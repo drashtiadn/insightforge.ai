@@ -22,12 +22,12 @@ repos:
       - id: ruff-format
         files: ^backend/
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies:
-          - pydantic>=2.9.0
-          - pydantic-settings>=2.6.0
-        args: ["--config-file=backend/pyproject.toml"]
+        name: mypy
+        entry: uv
+        language: system
+        args: [run, --directory, backend, mypy, src]
         files: ^backend/src/
+        pass_filenames: false
