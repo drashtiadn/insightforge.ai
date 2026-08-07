@@ -1,7 +1,7 @@
 """Structured logging for the application.
 
 Development uses readable text; production uses JSON lines for log aggregators.
-Request IDs come from ``request_id_var`` (set by request middleware).
+Request IDs come from ``request_id_var`` (set by ``RequestIdMiddleware``).
 """
 
 from __future__ import annotations

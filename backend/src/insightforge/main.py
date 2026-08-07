@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from insightforge.api.middleware import RequestLoggingMiddleware
+from insightforge.api.middleware import register_middleware
 from insightforge.api.routers.root import router as root_router
 from insightforge.api.v1 import api_router
 from insightforge.core.config import get_settings
@@ -37,7 +37,7 @@ def create_app() -> FastAPI:
         debug=settings.debug,
         lifespan=lifespan,
     )
-    app.add_middleware(RequestLoggingMiddleware)
+    register_middleware(app, settings)
     register_exception_handlers(app)
     app.include_router(root_router)
     app.include_router(api_router, prefix=settings.api_v1_prefix)

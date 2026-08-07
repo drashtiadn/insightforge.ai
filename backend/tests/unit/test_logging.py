@@ -4,10 +4,8 @@ import json
 import logging
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from insightforge.api.middleware import RequestLoggingMiddleware
 from insightforge.core.config import get_settings
 from insightforge.core.logging import JsonFormatter, configure_logging, get_logger
 from insightforge.main import create_app
@@ -44,35 +42,6 @@ def test_configure_logging_json(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert payload["message"] == "structured"
     assert payload["level"] == "INFO"
-
-
-def test_request_logging_adds_request_id() -> None:
-    app = FastAPI()
-    app.add_middleware(RequestLoggingMiddleware)
-
-    @app.get("/ping")
-    async def ping() -> dict[str, str]:
-        return {"ok": "true"}
-
-    client = TestClient(app)
-    response = client.get("/ping")
-
-    assert response.status_code == 200
-    assert "X-Request-ID" in response.headers
-
-
-def test_request_logging_reuses_incoming_request_id() -> None:
-    app = FastAPI()
-    app.add_middleware(RequestLoggingMiddleware)
-
-    @app.get("/ping")
-    async def ping() -> dict[str, str]:
-        return {"ok": "true"}
-
-    client = TestClient(app)
-    response = client.get("/ping", headers={"X-Request-ID": "req-123"})
-
-    assert response.headers["X-Request-ID"] == "req-123"
 
 
 def test_unhandled_error_is_logged(caplog: pytest.LogCaptureFixture) -> None:

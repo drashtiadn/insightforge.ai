@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     api_port: int = 8000
     api_v1_prefix: str = "/api/v1"
 
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:8501",
+    ]
+    cors_allow_credentials: bool = True
+    cors_allow_methods: list[str] = ["*"]
+    cors_allow_headers: list[str] = ["*"]
+    cors_expose_headers: list[str] = ["X-Request-ID", "X-Process-Time"]
+
     secret_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
