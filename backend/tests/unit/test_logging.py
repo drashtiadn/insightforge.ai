@@ -92,5 +92,8 @@ def test_unhandled_error_is_logged(caplog: pytest.LogCaptureFixture) -> None:
     get_settings.cache_clear()
 
     assert response.status_code == 500
-    assert response.json() == {"detail": "Internal server error"}
+    assert response.json() == {
+        "code": "internal_error",
+        "message": "Internal server error",
+    }
     assert any("unhandled error" in record.message for record in caplog.records)
