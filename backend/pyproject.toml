@@ -32,6 +32,8 @@ packages = ["src/insightforge"]
 [tool.uv]
 package = true
 default-groups = ["dev"]
+# Pure-Python mypy: Windows Application Control blocks mypyc DLLs in the binary wheel.
+no-binary-package = ["mypy"]
 
 # ---------------------------------------------------------------------------
 # Ruff — linter + formatter
