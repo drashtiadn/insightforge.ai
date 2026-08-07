@@ -8,26 +8,43 @@ Run locally:
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
+from insightforge.api.middleware import RequestLoggingMiddleware
 from insightforge.api.routers.root import router as root_router
 from insightforge.api.v1 import api_router
 from insightforge.core.config import get_settings
+from insightforge.core.logging import configure_logging, get_logger
+
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Startup and shutdown hooks for shared resources (DB, clients, etc.)."""
 
-    # startup
     yield
-    # shutdown
+
+
+async def unhandled_error(request: Request, _exc: Exception) -> JSONResponse:
+    """Log unexpected failures and return a generic 500 body (no internals leaked)."""
+
+    logger.exception(
+        "unhandled error",
+        extra={"method": request.method, "path": request.url.path},
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 def create_app() -> FastAPI:
-    """Create and wire the FastAPI application."""
+    """Create the FastAPI app with logging, middleware, and routes wired."""
 
     settings = get_settings()
+    configure_logging(settings.log_level, json_logs=settings.is_production)
 
     app = FastAPI(
         title=settings.app_name,
@@ -35,10 +52,10 @@ def create_app() -> FastAPI:
         debug=settings.debug,
         lifespan=lifespan,
     )
-
+    app.add_middleware(RequestLoggingMiddleware)
+    app.add_exception_handler(Exception, unhandled_error)
     app.include_router(root_router)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
-
     return app
 
 
