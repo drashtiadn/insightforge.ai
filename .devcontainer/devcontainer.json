@@ -1,0 +1,46 @@
+{
+  "name": "InsightForge AI",
+  "build": {
+    "context": "../backend",
+    "dockerfile": "Dockerfile",
+    "target": "development"
+  },
+  "workspaceFolder": "/app",
+  "workspaceMount": "source=${localWorkspaceFolder}/backend,target=/app,type=bind,consistency=cached",
+  "containerEnv": {
+    "APP_ENV": "development",
+    "DEBUG": "true",
+    "LOG_LEVEL": "DEBUG",
+    "UV_PROJECT_ENVIRONMENT": "/opt/venv"
+  },
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": {
+      "label": "API",
+      "onAutoForward": "notify"
+    }
+  },
+  "postCreateCommand": "uv sync",
+  "remoteUser": "root",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pydantic",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "editor.formatOnSave": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.codeActionsOnSave": {
+            "source.organizeImports.ruff": "explicit",
+            "source.fixAll.ruff": "explicit"
+          }
+        }
+      }
+    }
+  }
+}

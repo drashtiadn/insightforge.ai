@@ -1,0 +1,25 @@
+# Local development override (hot reload + source mount).
+# Usage:
+#   docker compose -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.dev.yml up --build
+
+services:
+  api:
+    build:
+      target: development
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ../../backend/src:/app/src
+    command:
+      [
+        "uvicorn",
+        "insightforge.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+      ]
+    restart: "no"
