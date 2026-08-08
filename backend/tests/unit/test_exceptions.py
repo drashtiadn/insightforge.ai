@@ -173,9 +173,7 @@ def test_app_exception_drops_unserializable_details(
         "request_id": "req-drop",
     }
     assert "details" not in response.json()
-    assert any(
-        "failed to serialize error details" in record.message for record in caplog.records
-    )
+    assert any("failed to serialize error details" in record.message for record in caplog.records)
     get_settings.cache_clear()
 
 
