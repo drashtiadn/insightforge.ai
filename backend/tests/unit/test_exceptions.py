@@ -1,6 +1,8 @@
 """Exception handling tests."""
 
 import logging
+from datetime import datetime
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -30,6 +32,28 @@ def _app_with_routes() -> TestClient:
     @app.get("/boom")
     async def boom() -> None:
         raise RuntimeError("boom")
+
+    @app.get("/raise-uuid-details")
+    async def raise_uuid_details() -> None:
+        raise NotFoundError(
+            "Report not found",
+            details={"report_id": UUID("12345678-1234-5678-1234-567812345678")},
+        )
+
+    @app.get("/raise-datetime-details")
+    async def raise_datetime_details() -> None:
+        raise NotFoundError(
+            "Report not found",
+            details={"created_at": datetime(2026, 8, 8, 12, 0, 0)},
+        )
+
+    @app.get("/raise-unserializable-details")
+    async def raise_unserializable_details() -> None:
+        raise NotFoundError("Report not found", details={"obj": object()})
+
+    @app.get("/raise-http-uuid")
+    async def raise_http_uuid() -> None:
+        raise HTTPException(status_code=404, detail={"id": uuid4()})
 
     @app.post("/echo")
     async def echo(payload: dict[str, str]) -> dict[str, str]:
@@ -99,4 +123,70 @@ def test_unhandled_error_schema_and_log(caplog: pytest.LogCaptureFixture) -> Non
     }
     assert "boom" not in response.text
     assert any("unhandled error" in record.message for record in caplog.records)
+    get_settings.cache_clear()
+
+
+def test_app_exception_serializes_uuid_details() -> None:
+    client = _app_with_routes()
+    response = client.get(
+        "/raise-uuid-details",
+        headers={"X-Request-ID": "req-uuid", "Origin": "http://localhost:3000"},
+    )
+
+    assert response.status_code == 404
+    assert response.headers["X-Request-ID"] == "req-uuid"
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.json() == {
+        "code": "not_found",
+        "message": "Report not found",
+        "details": {"report_id": "12345678-1234-5678-1234-567812345678"},
+        "request_id": "req-uuid",
+    }
+    get_settings.cache_clear()
+
+
+def test_app_exception_serializes_datetime_details() -> None:
+    client = _app_with_routes()
+    response = client.get("/raise-datetime-details")
+
+    assert response.status_code == 404
+    assert response.json()["details"] == {"created_at": "2026-08-08T12:00:00"}
+    get_settings.cache_clear()
+
+
+def test_app_exception_drops_unserializable_details(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _app_with_routes()
+
+    with caplog.at_level(logging.ERROR):
+        response = client.get(
+            "/raise-unserializable-details",
+            headers={"X-Request-ID": "req-drop"},
+        )
+
+    assert response.status_code == 404
+    assert response.headers["X-Request-ID"] == "req-drop"
+    assert response.json() == {
+        "code": "not_found",
+        "message": "Report not found",
+        "request_id": "req-drop",
+    }
+    assert "details" not in response.json()
+    assert any(
+        "failed to serialize error details" in record.message for record in caplog.records
+    )
+    get_settings.cache_clear()
+
+
+def test_http_exception_serializes_uuid_detail() -> None:
+    client = _app_with_routes()
+    response = client.get("/raise-http-uuid")
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["code"] == "not_found"
+    assert body["message"] == "HTTP error"
+    assert isinstance(body["details"]["detail"]["id"], str)
+    UUID(body["details"]["detail"]["id"])
     get_settings.cache_clear()
