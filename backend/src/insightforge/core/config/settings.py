@@ -8,7 +8,27 @@ from typing import Self
 from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
+
+def resolve_env_file(module_file: Path | None = None, cwd: Path | None = None) -> Path:
+    """Locate the project ``.env`` for both editable and wheel installs.
+
+    Editable / Docker src layout keeps ``settings.py`` under ``.../src/insightforge/...``,
+    so walking parents finds the directory that contains ``pyproject.toml`` (e.g. ``backend/``
+    or ``/app``).
+
+    Non-editable installs place the module under ``site-packages``, where that walk cannot
+    find the project root. Falling back to ``cwd / ".env"`` matches the image/workdir
+    convention (``/app/.env``) instead of inventing a path under ``lib/pythonX.Y/``.
+    """
+
+    start = (module_file or Path(__file__)).resolve()
+    for parent in start.parents:
+        if (parent / "pyproject.toml").is_file():
+            return parent / ".env"
+    return (cwd or Path.cwd()) / ".env"
+
+
+_ENV_FILE = resolve_env_file()
 
 
 class Environment(StrEnum):
