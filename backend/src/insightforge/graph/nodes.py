@@ -1,30 +1,31 @@
 """Graph nodes — each function does one step and returns state updates.
 
-These are deterministic stubs. Real agents plug in during later phases.
+``plan_node`` uses the ``Planner`` interface. Other nodes stay as stubs until
+their agents are implemented.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from insightforge.agents import Planner, SimplePlanner
+from insightforge.core.exceptions import ValidationFailedError
 from insightforge.graph.state import GraphState
 
 
-def plan_node(state: GraphState) -> dict[str, Any]:
-    """Turn the query into a short research plan."""
+def plan_node(
+    state: GraphState,
+    *,
+    planner: Planner | None = None,
+) -> dict[str, Any]:
+    """Turn the query into a short research plan via a ``Planner`` agent."""
 
-    query = state["query"].strip()
-    if not query:
-        return {"errors": ["query must not be empty"]}
-
-    return {
-        "plan": [
-            f"Research: {query}",
-            "Retrieve sources",
-            "Evaluate evidence",
-            "Write a report",
-        ],
-    }
+    agent = planner or SimplePlanner()
+    try:
+        plan = agent.plan(state["query"])
+    except ValidationFailedError as exc:
+        return {"errors": [exc.message]}
+    return {"plan": plan}
 
 
 def research_node(state: GraphState) -> dict[str, Any]:
