@@ -81,6 +81,15 @@ def test_production_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.secret_key.get_secret_value() == "prod-secret"
 
 
+def test_production_rejects_placeholder_secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DEBUG", "false")
+    monkeypatch.setenv("SECRET_KEY", "change-me-in-production")
+
+    with pytest.raises(ValidationError, match="placeholder"):
+        Settings(_env_file=None)
+
+
 def test_get_settings_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "development")
 

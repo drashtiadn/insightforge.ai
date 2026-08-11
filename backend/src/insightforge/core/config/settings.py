@@ -10,6 +10,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
 
+# Rejected in production so a known compose/docs placeholder cannot ship as the real key.
+_INSECURE_SECRET_PLACEHOLDERS = frozenset(
+    {
+        "change-me-in-production",
+        "changeme",
+        "change-me",
+        "secret",
+        "secret-key",
+    }
+)
+
 
 class Environment(StrEnum):
     """App environment.
@@ -67,6 +78,9 @@ class Settings(BaseSettings):
                 raise ValueError("DEBUG must be false in production")
             if self.secret_key is None:
                 raise ValueError("SECRET_KEY is required in production")
+            secret = self.secret_key.get_secret_value()
+            if secret in _INSECURE_SECRET_PLACEHOLDERS:
+                raise ValueError("SECRET_KEY must not be a known placeholder value")
         return self
 
 
