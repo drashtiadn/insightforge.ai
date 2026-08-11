@@ -7,6 +7,9 @@ services:
     image: insightforge-api:local
     ports:
       - "${API_PORT:-8000}:8000"
+    # Secrets (SECRET_KEY, API keys) come from backend/.env via env_file.
+    # Do not set SECRET_KEY here with a default — `environment` overrides
+    # env_file, so a weak default would silently replace a real secret.
     env_file:
       - path: ../../backend/.env
         required: false
@@ -16,7 +19,6 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       API_HOST: 0.0.0.0
       API_PORT: 8000
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
       interval: 30s
