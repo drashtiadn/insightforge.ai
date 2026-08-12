@@ -15,7 +15,9 @@ from insightforge.api.middleware.request_context import (
 )
 from insightforge.api.schemas.errors import ErrorResponse
 from insightforge.core.exceptions.base import AppException
-from insightforge.core.logging import request_id_var
+from insightforge.core.logging import get_logger, request_id_var
+
+logger = get_logger(__name__)
 
 _STATUS_CODES: dict[int, str] = {
     400: "bad_request",
@@ -40,16 +42,34 @@ def _error_response(
     message: str,
     details: dict[str, Any] | list[Any] | None = None,
 ) -> JSONResponse:
+    """Build a JSON error response.
+
+    Uses ``mode="json"`` so common detail values (UUID, datetime, Decimal, bytes)
+    serialize cleanly. If details still cannot be encoded, they are dropped rather
+    than turning a handled application error into an unhandled 500.
+    """
+
+    request_id = get_scope_request_id(request) or request_id_var.get()
     body = ErrorResponse(
         code=code,
         message=message,
         details=details,
-        request_id=get_scope_request_id(request) or request_id_var.get(),
+        request_id=request_id,
     )
-    return JSONResponse(
-        status_code=status_code,
-        content=body.model_dump(exclude_none=True),
-    )
+    try:
+        content = body.model_dump(mode="json", exclude_none=True)
+    except Exception:
+        logger.exception(
+            "failed to serialize error details; returning error without details",
+            extra={"error_code": code, "status_code": status_code},
+        )
+        content = ErrorResponse(
+            code=code,
+            message=message,
+            details=None,
+            request_id=request_id,
+        ).model_dump(mode="json", exclude_none=True)
+    return JSONResponse(status_code=status_code, content=content)
 
 
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
