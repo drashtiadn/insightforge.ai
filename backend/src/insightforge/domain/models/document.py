@@ -19,7 +19,7 @@ class Document(BaseModel):
     provider: SearchProviderHint
     score: float | None = Field(
         default=None,
-        description="Optional relevance score; filled by Phase 3.3 scoring",
+        description="Relevance score in 0..1 after search scoring",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
 

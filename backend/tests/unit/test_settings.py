@@ -104,6 +104,10 @@ def test_search_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.searxng_base_url is None
     assert settings.search_default_limit == 5
     assert settings.reddit_user_agent.startswith("insightforge/")
+    assert settings.search_max_workers == 4
+    assert settings.search_dedupe_enabled is True
+    assert settings.search_scoring_enabled is True
+    assert settings.search_max_documents == 20
 
 
 def test_get_settings_cached(monkeypatch: pytest.MonkeyPatch) -> None:

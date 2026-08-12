@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     reddit_user_agent: str = "insightforge/0.1.0 (research platform)"
     search_default_limit: int = 5
     search_timeout_seconds: float = 15.0
+    search_max_workers: int = 4
+    search_rate_limit_per_second: float = 2.0
+    search_dedupe_enabled: bool = True
+    search_scoring_enabled: bool = True
+    search_max_documents: int = 20
 
     @property
     def is_production(self) -> bool:

@@ -19,6 +19,7 @@ class GraphState(TypedDict):
     tasks: list[dict[str, Any]]
     notes: Annotated[list[str], add]
     sources: Annotated[list[dict[str, str]], add]
+    documents: Annotated[list[dict[str, Any]], add]
     score: float
     report: str
     errors: Annotated[list[str], add]
@@ -44,6 +45,7 @@ def initial_state(
         "tasks": [],
         "notes": [],
         "sources": [],
+        "documents": [],
         "score": 0.0,
         "report": "",
         "errors": [],
