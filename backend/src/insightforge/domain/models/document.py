@@ -1,4 +1,4 @@
-"""Domain document model returned by search providers."""
+"""Domain document models for search hits and parsed source text."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, HttpUrl
 
-from insightforge.shared.enums import SearchProviderHint
+from insightforge.shared.enums import ContentType, SearchProviderHint
 
 
 class Document(BaseModel):
@@ -33,3 +33,16 @@ class DocumentRef(BaseModel):
     title: str
     url: HttpUrl | str
     provider: SearchProviderHint | None = None
+
+
+class ParsedDocument(BaseModel):
+    """Normalized text extracted from a raw source (Phase 4.1 parsers).
+
+    Cleaning, chunking, and citation enrichment happen in later Phase 4 steps.
+    """
+
+    text: str
+    content_type: ContentType
+    title: str | None = None
+    url: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)

@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     search_scoring_enabled: bool = True
     search_max_documents: int = 20
 
+    # Document processing (Phase 4.1) — optional path to the tesseract binary
+    tesseract_cmd: str | None = None
+
     @property
     def is_production(self) -> bool:
         return self.app_env == Environment.PRODUCTION

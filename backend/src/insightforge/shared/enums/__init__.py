@@ -28,7 +28,18 @@ class SearchProviderHint(StrEnum):
     REDDIT = "reddit"
 
 
+class ContentType(StrEnum):
+    """Document content formats handled by Phase 4 parsers."""
+
+    HTML = "html"
+    MARKDOWN = "markdown"
+    PDF = "pdf"
+    OCR = "ocr"
+    JSON = "json"
+
+
 __all__ = [
+    "ContentType",
     "QueryIntent",
     "SearchProviderHint",
 ]
