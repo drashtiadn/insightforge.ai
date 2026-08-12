@@ -49,7 +49,10 @@ class HtmlDocumentParser(DocumentParser):
                     description = str(content).strip() or None
                 break
 
+        # Prefer article/main; strip common chrome before text extraction.
         root = soup.find("article") or soup.find("main") or soup.body or soup
+        for tag in root.find_all(["nav", "footer", "header", "aside", "form"]):
+            tag.decompose()
         text = root.get_text(separator="\n", strip=True)
 
         metadata = merge_metadata(

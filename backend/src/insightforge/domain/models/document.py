@@ -36,9 +36,9 @@ class DocumentRef(BaseModel):
 
 
 class ParsedDocument(BaseModel):
-    """Normalized text extracted from a raw source (Phase 4.1 parsers).
+    """Text extracted from a raw source (Phase 4.1) and optionally cleaned (4.2).
 
-    Cleaning, chunking, and citation enrichment happen in later Phase 4 steps.
+    Chunking and citation enrichment happen in later Phase 4 steps.
     """
 
     text: str

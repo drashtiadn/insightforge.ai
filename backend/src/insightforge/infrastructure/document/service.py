@@ -12,6 +12,7 @@ from insightforge.core.exceptions import ValidationFailedError
 from insightforge.core.logging import get_logger
 from insightforge.domain.models import Document, ParsedDocument
 from insightforge.infrastructure.document.base import DocumentParser
+from insightforge.infrastructure.document.cleaning import clean_document
 from insightforge.infrastructure.document.detect import detect_content_type
 from insightforge.infrastructure.document.parsers import (
     HtmlDocumentParser,
@@ -59,17 +60,28 @@ def build_parsers(
 class DocumentParseService:
     """Route raw documents to the matching format parser.
 
+    Pipeline: detect → parse → optional clean (Phase 4.2).
     Unknown formats and unavailable parsers raise ``ValidationFailedError`` for a
     single ``parse`` call. ``parse_many`` soft-fails per item so one bad source
     does not abort the batch.
     """
 
-    def __init__(self, parsers: Sequence[DocumentParser]) -> None:
+    def __init__(
+        self,
+        parsers: Sequence[DocumentParser],
+        *,
+        cleaning: bool = True,
+    ) -> None:
         self._parsers = list(parsers)
+        self._cleaning = cleaning
 
     @property
     def parsers(self) -> list[DocumentParser]:
         return list(self._parsers)
+
+    @property
+    def cleaning(self) -> bool:
+        return self._cleaning
 
     def get_parser(self, content_type: ContentType) -> DocumentParser | None:
         for parser in self._parsers:
@@ -125,6 +137,7 @@ class DocumentParseService:
         url: str | None = None,
         title: str | None = None,
         metadata: dict[str, Any] | None = None,
+        cleaning: bool | None = None,
     ) -> ParsedDocument:
         """Parse a single raw payload into a ``ParsedDocument``."""
 
@@ -148,10 +161,14 @@ class DocumentParseService:
             title=title,
             extra_metadata=metadata,
         )
+        apply_cleaning = self._cleaning if cleaning is None else cleaning
+        if apply_cleaning:
+            parsed = clean_document(parsed)
         logger.info(
-            "document parse finished parser=%s chars=%d",
+            "document parse finished parser=%s chars=%d cleaned=%s",
             parser.name.value,
             len(parsed.text),
+            apply_cleaning,
             extra={"parser": parser.name.value, "char_count": len(parsed.text)},
         )
         return parsed
@@ -161,6 +178,7 @@ class DocumentParseService:
         document: Document,
         *,
         raw: bytes | str | None = None,
+        cleaning: bool | None = None,
     ) -> ParsedDocument:
         """Parse payload associated with a search ``Document``."""
 
@@ -184,6 +202,7 @@ class DocumentParseService:
             url=document.url,
             title=document.title,
             metadata=meta,
+            cleaning=cleaning,
         )
 
     def parse_many(self, requests: Sequence[ParseRequest]) -> list[ParsedDocument]:
@@ -231,7 +250,8 @@ def create_document_parse_service(
         build_parsers(
             tesseract_cmd=cfg.tesseract_cmd,
             ocr_extract_text=ocr_extract_text,
-        )
+        ),
+        cleaning=cfg.document_cleaning_enabled,
     )
 
 
