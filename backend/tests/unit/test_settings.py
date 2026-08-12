@@ -93,6 +93,23 @@ def test_langsmith_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.langsmith_project == "insightforge"
 
 
+def test_search_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("SEARXNG_BASE_URL", raising=False)
+    monkeypatch.delenv("YOUTUBE_API_KEY", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.tavily_api_key is None
+    assert settings.searxng_base_url is None
+    assert settings.search_default_limit == 5
+    assert settings.reddit_user_agent.startswith("insightforge/")
+    assert settings.search_max_workers == 4
+    assert settings.search_dedupe_enabled is True
+    assert settings.search_scoring_enabled is True
+    assert settings.search_max_documents == 20
+
+
 def test_get_settings_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "development")
 

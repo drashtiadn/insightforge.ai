@@ -62,6 +62,20 @@ class Settings(BaseSettings):
     langsmith_project: str = "insightforge"
     langsmith_endpoint: str = "https://api.smith.langchain.com"
 
+    # Search providers (Phase 3.2)
+    tavily_api_key: SecretStr | None = None
+    searxng_base_url: str | None = None
+    github_token: SecretStr | None = None
+    youtube_api_key: SecretStr | None = None
+    reddit_user_agent: str = "insightforge/0.1.0 (research platform)"
+    search_default_limit: int = 5
+    search_timeout_seconds: float = 15.0
+    search_max_workers: int = 4
+    search_rate_limit_per_second: float = 2.0
+    search_dedupe_enabled: bool = True
+    search_scoring_enabled: bool = True
+    search_max_documents: int = 20
+
     @property
     def is_production(self) -> bool:
         return self.app_env == Environment.PRODUCTION

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from operator import add
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 
 class GraphState(TypedDict):
@@ -15,8 +15,11 @@ class GraphState(TypedDict):
 
     query: str
     plan: list[str]
+    intent: str
+    tasks: list[dict[str, Any]]
     notes: Annotated[list[str], add]
     sources: Annotated[list[dict[str, str]], add]
+    documents: Annotated[list[dict[str, Any]], add]
     score: float
     report: str
     errors: Annotated[list[str], add]
@@ -38,8 +41,11 @@ def initial_state(
     return {
         "query": query,
         "plan": [],
+        "intent": "",
+        "tasks": [],
         "notes": [],
         "sources": [],
+        "documents": [],
         "score": 0.0,
         "report": "",
         "errors": [],

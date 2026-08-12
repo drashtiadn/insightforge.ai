@@ -1,18 +1,26 @@
 """Graph nodes — each function does one step and returns state updates.
 
-``plan_node`` uses the ``Planner`` interface. ``retrieve_node`` retries
-transient failures. Unexpected errors are recorded in state so the graph can
-recover instead of crashing.
+``plan_node`` uses the ``Planner`` interface. ``retrieve_node`` can pull real
+documents via ``SearchService`` when tasks exist; otherwise it uses the stub
+fetcher so CI stays offline. Unexpected errors are recorded in state so the
+graph can recover instead of crashing.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError
+
 from insightforge.agents import Planner, SimplePlanner
+from insightforge.agents.planner.schemas import ResearchTask
 from insightforge.core.exceptions import ValidationFailedError
+from insightforge.core.logging import get_logger
 from insightforge.graph.retry import call_with_retry
 from insightforge.graph.state import GraphState
+from insightforge.infrastructure.search import SearchService
+
+logger = get_logger(__name__)
 
 
 def _move(state: GraphState, phase: str) -> dict[str, Any]:
@@ -29,23 +37,49 @@ def plan_node(
     *,
     planner: Planner | None = None,
 ) -> dict[str, Any]:
-    """Turn the query into a short research plan via a ``Planner`` agent."""
+    """Analyze the query and store a structured research plan."""
 
     agent = planner or SimplePlanner()
     try:
-        plan = agent.plan(state["query"])
+        research_plan = agent.build_plan(state["query"])
     except ValidationFailedError as exc:
+        logger.warning(
+            "plan validation failed query_len=%d error=%s",
+            len(state["query"]),
+            exc.message,
+        )
         return {"errors": [exc.message], **_move(state, "failed")}
-    return {"plan": plan, **_move(state, "plan")}
+
+    logger.info(
+        "plan node complete intent=%s task_count=%d",
+        research_plan.intent.value,
+        len(research_plan.tasks),
+        extra={
+            "intent": research_plan.intent.value,
+            "task_count": len(research_plan.tasks),
+        },
+    )
+    return {
+        "plan": research_plan.steps,
+        "intent": research_plan.intent.value,
+        "tasks": [task.model_dump(mode="json") for task in research_plan.tasks],
+        **_move(state, "plan"),
+    }
 
 
 def research_node(state: GraphState) -> dict[str, Any]:
     """Add a research note for this step."""
 
     step = state["step"] + 1
+    note = f"Step {step}: looked into {state['query']}"
+    if state["tasks"]:
+        idx = min(step - 1, len(state["tasks"]) - 1)
+        task_desc = str(state["tasks"][idx].get("description") or "")
+        if task_desc:
+            note = f"Step {step}: {task_desc}"
     return {
         "step": step,
-        "notes": [f"Step {step}: looked into {state['query']}"],
+        "notes": [note],
         **_move(state, "research"),
     }
 
@@ -54,6 +88,7 @@ def fetch_source(query: str, step: int) -> dict[str, str]:
     """Fetch one source document.
 
     Isolated so tests can simulate transient failures with monkeypatch.
+    Offline stub used when no ``SearchService`` is injected.
     """
 
     return {
@@ -62,8 +97,55 @@ def fetch_source(query: str, step: int) -> dict[str, str]:
     }
 
 
-def retrieve_node(state: GraphState) -> dict[str, Any]:
-    """Attach a source for this step, retrying transient I/O errors."""
+def _task_for_step(state: GraphState) -> ResearchTask | None:
+    tasks = state["tasks"]
+    if not tasks:
+        return None
+    idx = min(max(state["step"] - 1, 0), len(tasks) - 1)
+    try:
+        return ResearchTask.model_validate(tasks[idx])
+    except ValidationError as exc:
+        logger.warning("invalid research task at index=%d error=%s", idx, exc)
+        return None
+
+
+def retrieve_node(
+    state: GraphState,
+    *,
+    search_service: SearchService | None = None,
+) -> dict[str, Any]:
+    """Attach sources for this step.
+
+    When ``search_service`` is provided and planner tasks exist, runs the
+    Phase 3 search pipeline (parallel / dedupe / score / rate-limit).
+    Otherwise falls back to the offline stub fetcher.
+    """
+
+    task = _task_for_step(state) if search_service is not None else None
+    if search_service is not None and task is not None:
+        try:
+            documents = call_with_retry(
+                lambda: search_service.search_task(task),
+                max_attempts=state["max_retries"],
+            )
+        except Exception as exc:
+            return {
+                "errors": [f"retrieve failed: {exc}"],
+                **_move(state, "failed"),
+            }
+
+        serialized = [doc.model_dump(mode="json") for doc in documents]
+        sources = [{"title": doc.title, "url": doc.url} for doc in documents]
+        logger.info(
+            "retrieve via search task_id=%s document_count=%d",
+            task.id,
+            len(documents),
+        )
+        return {
+            "documents": serialized,
+            "sources": sources,
+            **_move(state, "retrieve"),
+        }
 
     try:
         source = call_with_retry(
@@ -94,14 +176,23 @@ def report_node(state: GraphState) -> dict[str, Any]:
     plan = "\n".join(f"- {item}" for item in state["plan"]) or "- none"
     notes = "\n".join(f"- {note}" for note in state["notes"]) or "- none"
     sources = "\n".join(f"- [{s['title']}]({s['url']})" for s in state["sources"]) or "- none"
+    intent = state["intent"] or "unknown"
 
     report = (
         f"Query: {state['query']}\n"
+        f"Intent: {intent}\n"
         f"Score: {state['score']}\n\n"
         f"Plan:\n{plan}\n\n"
         f"Notes:\n{notes}\n\n"
         f"Sources:\n{sources}\n"
     )
+    if state["documents"]:
+        doc_lines = []
+        for doc in state["documents"]:
+            score = doc.get("score")
+            score_txt = f" score={score:.3f}" if isinstance(score, int | float) else ""
+            doc_lines.append(f"- [{doc.get('title')}]({doc.get('url')}){score_txt}")
+        report += "\nDocuments:\n" + "\n".join(doc_lines) + "\n"
     if state["errors"]:
         error_lines = "\n".join(f"- {err}" for err in state["errors"])
         report += f"\nErrors:\n{error_lines}\n"
