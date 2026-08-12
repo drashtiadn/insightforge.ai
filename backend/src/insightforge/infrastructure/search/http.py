@@ -25,9 +25,19 @@ def require_query(query: str) -> str:
 
 
 def create_http_client(*, timeout: float = 15.0) -> httpx.Client:
-    """Build a short-lived sync client for provider calls."""
+    """Build a sync client shared by search providers for a service lifetime."""
 
     return httpx.Client(timeout=httpx.Timeout(timeout), follow_redirects=True)
+
+
+def close_http_client(client: httpx.Client | None) -> None:
+    """Close ``client`` if it is still open. Safe to call more than once."""
+
+    if client is None:
+        return
+    if client.is_closed:
+        return
+    client.close()
 
 
 def raise_for_status(response: httpx.Response, *, provider: str) -> None:

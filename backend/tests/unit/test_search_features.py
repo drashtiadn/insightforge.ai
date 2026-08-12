@@ -5,17 +5,22 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any
+from unittest.mock import MagicMock
 
-from insightforge.agents.planner.schemas import ResearchTask
-from insightforge.domain.models import Document
-from insightforge.graph.nodes import retrieve_node
+import httpx
+import pytest
+
+from insightforge.domain.models import Document, ResearchTask
+from insightforge.graph.nodes import search_node
 from insightforge.graph.state import initial_state
 from insightforge.infrastructure.search import (
     RateLimiter,
     SearchProvider,
     SearchService,
+    create_search_service,
     dedupe_documents,
     normalize_url,
+    provider_metadata_score,
     score_document,
     score_documents,
 )
@@ -112,10 +117,29 @@ def test_score_documents_orders_by_relevance() -> None:
     assert scored[0].score > (scored[1].score or 0.0)
 
 
-def test_score_document_uses_provider_weight() -> None:
+def test_score_document_ignores_provider_identity() -> None:
     arxiv = _doc("Paper", "https://arxiv.org/abs/1", SearchProviderHint.ARXIV, snippet="x")
     reddit = _doc("Post", "https://reddit.com/r/x", SearchProviderHint.REDDIT, snippet="x")
-    assert score_document(arxiv, "topic") > score_document(reddit, "topic")
+    assert score_document(arxiv, "topic") == score_document(reddit, "topic")
+
+
+def test_score_document_ignores_provider_metadata_score() -> None:
+    plain = _doc(
+        "LangGraph guide",
+        "https://example.com/a",
+        SearchProviderHint.WEB,
+        snippet="LangGraph agents",
+    )
+    boosted = _doc(
+        "LangGraph guide",
+        "https://example.com/b",
+        SearchProviderHint.WEB,
+        snippet="LangGraph agents",
+        metadata={"score": 0.99, "stars": 9000},
+    )
+    assert score_document(plain, "LangGraph agents") == score_document(boosted, "LangGraph agents")
+    assert provider_metadata_score(boosted) is not None
+    assert provider_metadata_score(plain) is None
 
 
 def test_rate_limiter_enforces_interval() -> None:
@@ -255,7 +279,56 @@ def test_search_tasks_merges_across_planner_tasks() -> None:
     assert {doc.title for doc in docs} == {"A", "B"}
 
 
-def test_retrieve_node_uses_search_service() -> None:
+def test_search_tasks_scores_each_task_against_its_own_query() -> None:
+    providers = {
+        SearchProviderHint.WEB: _FakeProvider(
+            SearchProviderHint.WEB,
+            [
+                _doc(
+                    "Alpha hit",
+                    "https://example.com/alpha",
+                    SearchProviderHint.WEB,
+                    snippet="alpha topic",
+                )
+            ],
+        ),
+        SearchProviderHint.WIKIPEDIA: _FakeProvider(
+            SearchProviderHint.WIKIPEDIA,
+            [
+                _doc(
+                    "Beta hit",
+                    "https://example.com/beta",
+                    SearchProviderHint.WIKIPEDIA,
+                    snippet="beta topic",
+                )
+            ],
+        ),
+    }
+    service = SearchService(providers, scoring=True, dedupe=False)
+    tasks = [
+        ResearchTask(
+            id="t1",
+            description="alpha",
+            search_query="alpha",
+            providers=[SearchProviderHint.WEB],
+            priority=1,
+        ),
+        ResearchTask(
+            id="t2",
+            description="beta",
+            search_query="beta",
+            providers=[SearchProviderHint.WIKIPEDIA],
+            priority=2,
+        ),
+    ]
+    docs = {doc.title: doc for doc in service.search_tasks(tasks)}
+    assert docs["Alpha hit"].score is not None
+    assert docs["Beta hit"].score is not None
+    assert docs["Alpha hit"].score > 0.5
+    assert docs["Beta hit"].score > 0.5
+
+
+def test_search_node_uses_search_service() -> None:
     provider = _FakeProvider(
         SearchProviderHint.WIKIPEDIA,
         [
@@ -281,18 +354,54 @@ def test_retrieve_node_uses_search_service() -> None:
         ).model_dump(mode="json")
     ]
 
-    result = retrieve_node(state, search_service=service)
-    assert result["phase"] == "retrieve"
+    result = search_node(state, search_service=service)
+    assert result["phase"] == "search"
     assert len(result["documents"]) == 1
     assert result["documents"][0]["title"] == "Photosynthesis"
     assert result["sources"][0]["url"].endswith("Photosynthesis")
     assert result["documents"][0]["score"] is not None
 
 
-def test_retrieve_node_stub_path_without_search_service() -> None:
+def test_search_node_stub_path_without_search_service() -> None:
     state = initial_state("AI")
     state["step"] = 1
     state["phase"] = "research"
-    result = retrieve_node(state)
+    result = search_node(state)
     assert result["sources"][0]["title"].startswith("Source 1")
     assert "documents" not in result
+
+
+def test_create_search_service_owns_and_closes_http_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = MagicMock(spec=httpx.Client)
+    fake_client.is_closed = False
+    monkeypatch.setattr(
+        "insightforge.infrastructure.search.service.create_http_client",
+        lambda **_kwargs: fake_client,
+    )
+    monkeypatch.setattr(
+        "insightforge.infrastructure.search.service.build_providers",
+        lambda _settings, _client: {},
+    )
+
+    service = create_search_service()
+    assert service.owns_client is True
+    assert service.client is fake_client
+    service.close()
+    fake_client.close.assert_called_once()
+    assert service.client is None
+    assert service.owns_client is False
+
+    # Idempotent
+    service.close()
+    fake_client.close.assert_called_once()
+
+
+def test_create_search_service_does_not_close_injected_client() -> None:
+    injected = MagicMock(spec=httpx.Client)
+    injected.is_closed = False
+    service = SearchService({}, client=injected, owns_client=False)
+    with service:
+        pass
+    injected.close.assert_not_called()

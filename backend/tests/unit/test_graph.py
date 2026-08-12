@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from insightforge.graph import (
+    AUTO_MAX_STEPS,
     PASS_SCORE,
     after_evaluate,
     after_plan,
@@ -12,7 +13,7 @@ from insightforge.graph import (
     plan_node,
     report_node,
     research_node,
-    retrieve_node,
+    search_node,
 )
 
 
@@ -24,6 +25,13 @@ def test_plan_creates_steps() -> None:
     assert result["intent"]
     assert len(result["plan"]) == 3
     assert len(result["tasks"]) == 3
+    assert result["max_steps"] == 3
+
+
+def test_plan_respects_explicit_max_steps_budget() -> None:
+    result = plan_node(initial_state("climate", max_steps=1))
+    assert result["max_steps"] == 1
+    assert len(result["tasks"]) == 3
 
 
 def test_plan_rejects_empty_query() -> None:
@@ -32,7 +40,7 @@ def test_plan_rejects_empty_query() -> None:
     assert result["phase"] == "failed"
 
 
-def test_research_and_retrieve() -> None:
+def test_research_and_search() -> None:
     state = initial_state("AI")
     researched = research_node(state)
     assert researched["step"] == 1
@@ -41,10 +49,10 @@ def test_research_and_retrieve() -> None:
 
     state["step"] = 1
     state["phase"] = "research"
-    retrieved = retrieve_node(state)
-    assert retrieved["phase"] == "retrieve"
-    assert retrieved["sources"][0]["title"].startswith("Source 1")
-    assert "example.com" in retrieved["sources"][0]["url"]
+    searched = search_node(state)
+    assert searched["phase"] == "search"
+    assert searched["sources"][0]["title"].startswith("Source 1")
+    assert "example.com" in searched["sources"][0]["url"]
 
 
 def test_evaluate_scores_notes_and_sources() -> None:
@@ -83,6 +91,7 @@ def test_after_evaluate_routes() -> None:
     assert after_evaluate(state) == "research"
 
     state["score"] = PASS_SCORE
+    state["tasks"] = []
     assert after_evaluate(state) == "report"
 
     state["score"] = 0.1
@@ -90,9 +99,21 @@ def test_after_evaluate_routes() -> None:
     assert after_evaluate(state) == "report"
 
 
+def test_after_evaluate_continues_until_all_planned_tasks() -> None:
+    state = initial_state("topic", max_steps=3)
+    state["tasks"] = [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}]
+    state["score"] = 1.0
+    state["step"] = 2
+    # Score is high, but planned task t3 has not run yet.
+    assert after_evaluate(state) == "research"
+
+    state["step"] = 3
+    assert after_evaluate(state) == "report"
+
+
 def test_after_evaluate_recovers_with_partial_data() -> None:
     state = initial_state("topic")
-    state["errors"] = ["retrieve failed: boom"]
+    state["errors"] = ["search failed: boom"]
     state["notes"] = ["partial note"]
     assert after_evaluate(state) == "report"
 
@@ -104,7 +125,7 @@ def test_after_evaluate_ends_when_nothing_to_recover() -> None:
 
 
 def test_full_graph_run() -> None:
-    graph = compile_graph()
+    graph = compile_graph(stub_search=True)
     result = graph.invoke(initial_state("multi-agent systems"))
 
     assert result["errors"] == []
@@ -114,16 +135,18 @@ def test_full_graph_run() -> None:
     assert result["intent"]
     assert len(result["plan"]) == 3
     assert len(result["tasks"]) == 3
-    assert result["step"] == 2
-    assert len(result["notes"]) == 2
-    assert len(result["sources"]) == 2
+    assert result["max_steps"] == 3
+    assert result["step"] == 3
+    assert len(result["notes"]) == 3
+    assert len(result["sources"]) == 3
     assert result["score"] >= PASS_SCORE
     assert "init->plan" in result["transitions"]
+    assert "research->search" in result["transitions"]
     assert result["transitions"][-1] == "evaluate->done"
 
 
 def test_full_graph_empty_query() -> None:
-    graph = compile_graph()
+    graph = compile_graph(stub_search=True)
     result = graph.invoke(initial_state("  "))
 
     assert result["errors"] == ["query must not be empty"]
@@ -132,7 +155,7 @@ def test_full_graph_empty_query() -> None:
 
 
 def test_full_graph_stops_at_max_steps() -> None:
-    graph = compile_graph()
+    graph = compile_graph(stub_search=True)
     result = graph.invoke(initial_state("budget test", max_steps=1))
 
     assert result["step"] == 1
@@ -142,3 +165,43 @@ def test_full_graph_stops_at_max_steps() -> None:
     assert result["score"] < PASS_SCORE
     assert result["phase"] == "done"
     assert result["report"]
+
+
+def test_initial_state_defaults_to_auto_max_steps() -> None:
+    state = initial_state("q")
+    assert state["max_steps"] == AUTO_MAX_STEPS
+
+
+def test_full_graph_uses_injected_search_service() -> None:
+    from insightforge.domain.models import Document
+    from insightforge.infrastructure.search import SearchProvider, SearchService
+    from insightforge.shared.enums import SearchProviderHint
+
+    class _Provider(SearchProvider):
+        name = SearchProviderHint.WIKIPEDIA
+
+        def search(self, query: str, *, limit: int = 5) -> list[Document]:
+            return [
+                Document(
+                    title=f"Doc for {query}",
+                    url=f"https://example.com/{query.replace(' ', '-')}",
+                    snippet=query,
+                    content=query,
+                    provider=SearchProviderHint.WIKIPEDIA,
+                )
+            ]
+
+    service = SearchService(
+        {SearchProviderHint.WIKIPEDIA: _Provider()},
+        scoring=True,
+    )
+    # Planner tasks include wikipedia for exploratory queries.
+    graph = compile_graph(search_service=service)
+    result = graph.invoke(initial_state("photosynthesis", max_steps=1))
+
+    assert result["errors"] == []
+    assert result["phase"] == "done"
+    assert len(result["documents"]) >= 1
+    assert result["documents"][0]["title"].startswith("Doc for")
+    assert len(result["sources"]) >= 1
+    assert "example.com" in result["sources"][0]["url"]

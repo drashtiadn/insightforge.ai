@@ -19,7 +19,10 @@ class Document(BaseModel):
     provider: SearchProviderHint
     score: float | None = Field(
         default=None,
-        description="Relevance score in 0..1 after search scoring",
+        description=(
+            "Application relevance score in 0..1 after search scoring. "
+            "Provider-native signals stay in metadata and are not this field."
+        ),
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
 

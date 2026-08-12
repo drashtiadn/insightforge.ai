@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from insightforge.shared.enums import QueryIntent, SearchProviderHint
+from insightforge.domain.models import ResearchTask
+from insightforge.shared.enums import QueryIntent
+
+__all__ = [
+    "QueryAnalysis",
+    "ResearchPlan",
+    "ResearchTask",
+]
 
 
 class QueryAnalysis(BaseModel):
@@ -14,16 +21,6 @@ class QueryAnalysis(BaseModel):
     normalized_query: str
     keywords: list[str] = Field(default_factory=list)
     token_count: int = Field(ge=0)
-
-
-class ResearchTask(BaseModel):
-    """One searchable unit of work for later provider execution."""
-
-    id: str
-    description: str
-    search_query: str
-    providers: list[SearchProviderHint] = Field(default_factory=list)
-    priority: int = Field(ge=1, description="Lower number = higher priority")
 
 
 class ResearchPlan(BaseModel):

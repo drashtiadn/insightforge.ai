@@ -5,6 +5,9 @@ from __future__ import annotations
 from operator import add
 from typing import Annotated, Any, TypedDict
 
+# Sentinel: resolve max_steps from planned task count in plan_node.
+AUTO_MAX_STEPS = 0
+
 
 class GraphState(TypedDict):
     """What the research graph remembers between steps.
@@ -33,10 +36,15 @@ class GraphState(TypedDict):
 def initial_state(
     query: str,
     *,
-    max_steps: int = 2,
+    max_steps: int | None = None,
     max_retries: int = 3,
 ) -> GraphState:
-    """Starting values for a new research run."""
+    """Starting values for a new research run.
+
+    ``max_steps=None`` (default) means "run every planned task" — resolved
+    in ``plan_node`` once the planner returns tasks. Pass an explicit positive
+    integer to cap the research budget.
+    """
 
     return {
         "query": query,
@@ -50,7 +58,7 @@ def initial_state(
         "report": "",
         "errors": [],
         "step": 0,
-        "max_steps": max_steps,
+        "max_steps": AUTO_MAX_STEPS if max_steps is None else max_steps,
         "max_retries": max_retries,
         "phase": "init",
         "transitions": [],

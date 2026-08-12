@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from insightforge.agents.planner.schemas import QueryAnalysis, ResearchTask
+from insightforge.agents.planner.schemas import QueryAnalysis
 from insightforge.core.logging import get_logger
+from insightforge.domain.models import ResearchTask
 from insightforge.shared.enums import QueryIntent, SearchProviderHint
 
 logger = get_logger(__name__)
