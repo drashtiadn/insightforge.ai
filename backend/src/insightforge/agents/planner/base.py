@@ -1,18 +1,20 @@
-"""Planner agent interface — turns a query into ordered research steps."""
+"""Planner agent interface — turns a query into a structured research plan."""
 
 from __future__ import annotations
 
 from abc import abstractmethod
 
 from insightforge.agents.base import BaseAgent
+from insightforge.agents.planner.schemas import ResearchPlan
 from insightforge.agents.tools import Tool
 
 
 class Planner(BaseAgent):
     """Contract for planning agents.
 
-    Implementations may call an LLM later; for now they only need to return a
-    clear list of steps from ``plan``.
+    Implementations analyze the query, detect intent, and decompose work into
+    ordered ``ResearchTask`` items. ``plan`` remains a thin list view for
+    report rendering and older call sites.
     """
 
     name = "planner"
@@ -21,10 +23,15 @@ class Planner(BaseAgent):
         super().__init__(tools=tools)
 
     @abstractmethod
+    def build_plan(self, query: str) -> ResearchPlan:
+        """Return a structured research plan for ``query``."""
+
     def plan(self, query: str) -> list[str]:
-        """Return ordered research steps for ``query``."""
+        """Return human-readable step descriptions from ``build_plan``."""
 
-    def run(self, query: str) -> list[str]:
-        """``BaseAgent`` entry point — delegates to ``plan``."""
+        return self.build_plan(query).steps
 
-        return self.plan(query)
+    def run(self, query: str) -> ResearchPlan:
+        """``BaseAgent`` entry point — delegates to ``build_plan``."""
+
+        return self.build_plan(query)

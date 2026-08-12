@@ -21,7 +21,9 @@ def test_plan_creates_steps() -> None:
     assert "errors" not in result
     assert result["phase"] == "plan"
     assert result["transitions"] == ["init->plan"]
-    assert len(result["plan"]) == 4
+    assert result["intent"]
+    assert len(result["plan"]) == 3
+    assert len(result["tasks"]) == 3
 
 
 def test_plan_rejects_empty_query() -> None:
@@ -109,7 +111,9 @@ def test_full_graph_run() -> None:
     assert result["phase"] == "done"
     assert result["report"]
     assert "multi-agent systems" in result["report"]
-    assert len(result["plan"]) == 4
+    assert result["intent"]
+    assert len(result["plan"]) == 3
+    assert len(result["tasks"]) == 3
     assert result["step"] == 2
     assert len(result["notes"]) == 2
     assert len(result["sources"]) == 2

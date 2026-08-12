@@ -11,8 +11,11 @@ from typing import Any
 
 from insightforge.agents import Planner, SimplePlanner
 from insightforge.core.exceptions import ValidationFailedError
+from insightforge.core.logging import get_logger
 from insightforge.graph.retry import call_with_retry
 from insightforge.graph.state import GraphState
+
+logger = get_logger(__name__)
 
 
 def _move(state: GraphState, phase: str) -> dict[str, Any]:
@@ -29,14 +32,34 @@ def plan_node(
     *,
     planner: Planner | None = None,
 ) -> dict[str, Any]:
-    """Turn the query into a short research plan via a ``Planner`` agent."""
+    """Analyze the query and store a structured research plan."""
 
     agent = planner or SimplePlanner()
     try:
-        plan = agent.plan(state["query"])
+        research_plan = agent.build_plan(state["query"])
     except ValidationFailedError as exc:
+        logger.warning(
+            "plan validation failed query_len=%d error=%s",
+            len(state["query"]),
+            exc.message,
+        )
         return {"errors": [exc.message], **_move(state, "failed")}
-    return {"plan": plan, **_move(state, "plan")}
+
+    logger.info(
+        "plan node complete intent=%s task_count=%d",
+        research_plan.intent.value,
+        len(research_plan.tasks),
+        extra={
+            "intent": research_plan.intent.value,
+            "task_count": len(research_plan.tasks),
+        },
+    )
+    return {
+        "plan": research_plan.steps,
+        "intent": research_plan.intent.value,
+        "tasks": [task.model_dump(mode="json") for task in research_plan.tasks],
+        **_move(state, "plan"),
+    }
 
 
 def research_node(state: GraphState) -> dict[str, Any]:
@@ -94,9 +117,11 @@ def report_node(state: GraphState) -> dict[str, Any]:
     plan = "\n".join(f"- {item}" for item in state["plan"]) or "- none"
     notes = "\n".join(f"- {note}" for note in state["notes"]) or "- none"
     sources = "\n".join(f"- [{s['title']}]({s['url']})" for s in state["sources"]) or "- none"
+    intent = state["intent"] or "unknown"
 
     report = (
         f"Query: {state['query']}\n"
+        f"Intent: {intent}\n"
         f"Score: {state['score']}\n\n"
         f"Plan:\n{plan}\n\n"
         f"Notes:\n{notes}\n\n"
