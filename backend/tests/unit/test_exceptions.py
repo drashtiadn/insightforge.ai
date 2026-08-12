@@ -93,10 +93,16 @@ def test_unhandled_error_schema_and_log(caplog: pytest.LogCaptureFixture) -> Non
         response = client.get("/boom")
 
     assert response.status_code == 500
-    assert response.json() == {
-        "code": "internal_error",
-        "message": "Internal server error",
-    }
+    body = response.json()
+    assert body["code"] == "internal_error"
+    assert body["message"] == "Internal server error"
+    assert "request_id" in body
     assert "boom" not in response.text
-    assert any("unhandled error" in record.message for record in caplog.records)
+    error_records = [
+        record
+        for record in caplog.records
+        if record.name == "insightforge.api" and "API GET /boom -> 500 (" in record.message
+    ]
+    assert error_records
+    assert error_records[0].exc_info is not None
     get_settings.cache_clear()

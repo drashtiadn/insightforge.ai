@@ -81,6 +81,18 @@ def test_production_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.secret_key.get_secret_value() == "prod-secret"
 
 
+def test_langsmith_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_TRACING", raising=False)
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.langsmith_tracing is False
+    assert settings.langsmith_api_key is None
+    assert settings.langsmith_project == "insightforge"
+
+
 def test_get_settings_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "development")
 

@@ -79,7 +79,12 @@ def configure_logging(level: str = "INFO", *, json_logs: bool = False) -> None:
     if json_logs:
         handler.setFormatter(JsonFormatter())
     else:
-        handler.setFormatter(_TextFormatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s"))
+        handler.setFormatter(
+            _TextFormatter(
+                "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
     root.addHandler(handler)
 
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

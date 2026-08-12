@@ -9,11 +9,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from insightforge.api.middleware.request_context import (
+    get_scope_request_id,
+    set_request_error,
+)
 from insightforge.api.schemas.errors import ErrorResponse
 from insightforge.core.exceptions.base import AppException
-from insightforge.core.logging import get_logger, request_id_var
-
-logger = get_logger(__name__)
+from insightforge.core.logging import request_id_var
 
 _STATUS_CODES: dict[int, str] = {
     400: "bad_request",
@@ -31,6 +33,7 @@ _STATUS_CODES: dict[int, str] = {
 
 
 def _error_response(
+    request: Request,
     *,
     status_code: int,
     code: str,
@@ -41,7 +44,7 @@ def _error_response(
         code=code,
         message=message,
         details=details,
-        request_id=request_id_var.get(),
+        request_id=get_scope_request_id(request) or request_id_var.get(),
     )
     return JSONResponse(
         status_code=status_code,
@@ -49,19 +52,13 @@ def _error_response(
     )
 
 
-async def app_exception_handler(_request: Request, exc: AppException) -> JSONResponse:
+async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     """Handle known application errors raised by domain/application code."""
 
-    log = logger.warning if exc.status_code < 500 else logger.error
-    log(
-        "application error",
-        extra={
-            "error_code": exc.code,
-            "status_code": exc.status_code,
-            "error_message": exc.message,
-        },
-    )
+    if exc.status_code >= 500:
+        set_request_error(request, exc)
     return _error_response(
+        request,
         status_code=exc.status_code,
         code=exc.code,
         message=exc.message,
@@ -70,23 +67,28 @@ async def app_exception_handler(_request: Request, exc: AppException) -> JSONRes
 
 
 async def http_exception_handler(
-    _request: Request,
+    request: Request,
     exc: StarletteHTTPException,
 ) -> JSONResponse:
     """Normalize framework ``HTTPException`` into the standard error schema."""
 
     message = exc.detail if isinstance(exc.detail, str) else "HTTP error"
     details = None if isinstance(exc.detail, str) else {"detail": exc.detail}
+    code = _STATUS_CODES.get(exc.status_code, "http_error")
+
+    if exc.status_code >= 500:
+        set_request_error(request, exc)
     return _error_response(
+        request,
         status_code=exc.status_code,
-        code=_STATUS_CODES.get(exc.status_code, "http_error"),
+        code=code,
         message=message,
         details=details,
     )
 
 
 async def validation_exception_handler(
-    _request: Request,
+    request: Request,
     exc: RequestValidationError,
 ) -> JSONResponse:
     """Handle FastAPI/Pydantic request validation failures."""
@@ -100,6 +102,7 @@ async def validation_exception_handler(
         for error in exc.errors()
     ]
     return _error_response(
+        request,
         status_code=422,
         code="validation_failed",
         message="Request validation failed",
@@ -108,13 +111,11 @@ async def validation_exception_handler(
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Log unexpected failures; never leak internals to the client."""
+    """Return a safe client error; access middleware logs the stack trace."""
 
-    logger.exception(
-        "unhandled error",
-        extra={"method": request.method, "path": request.url.path},
-    )
+    set_request_error(request, exc)
     return _error_response(
+        request,
         status_code=500,
         code="internal_error",
         message="Internal server error",

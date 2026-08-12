@@ -61,8 +61,11 @@ def test_unhandled_error_is_logged(caplog: pytest.LogCaptureFixture) -> None:
     get_settings.cache_clear()
 
     assert response.status_code == 500
-    assert response.json() == {
-        "code": "internal_error",
-        "message": "Internal server error",
-    }
-    assert any("unhandled error" in record.message for record in caplog.records)
+    body = response.json()
+    assert body["code"] == "internal_error"
+    assert body["message"] == "Internal server error"
+    assert "request_id" in body
+    assert any(
+        record.name == "insightforge.api" and "API GET /boom -> 500 (" in record.message
+        for record in caplog.records
+    )
