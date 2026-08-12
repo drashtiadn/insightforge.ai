@@ -85,6 +85,6 @@ def test_run_research_works_with_tracing_configured(
     monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
     configure_tracing(Settings(_env_file=None))
 
-    result = run_research("langsmith tracing")
+    result = run_research("langsmith tracing", stub_search=True)
     assert result.ok
     assert result.phase == "done"

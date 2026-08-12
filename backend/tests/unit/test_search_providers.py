@@ -5,8 +5,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from insightforge.agents.planner.schemas import ResearchTask
 from insightforge.core.exceptions import ExternalServiceError, ValidationFailedError
+from insightforge.domain.models import ResearchTask
 from insightforge.infrastructure.search import (
     ArxivSearchProvider,
     GitHubSearchProvider,

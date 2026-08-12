@@ -4,17 +4,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from types import TracebackType
+from typing import Self
 
 import httpx
 
-from insightforge.agents.planner.schemas import ResearchTask
 from insightforge.core.config import Settings, get_settings
 from insightforge.core.exceptions import ExternalServiceError, ValidationFailedError
 from insightforge.core.logging import get_logger
-from insightforge.domain.models import Document
+from insightforge.domain.models import Document, ResearchTask
 from insightforge.infrastructure.search.base import SearchProvider
 from insightforge.infrastructure.search.dedupe import dedupe_documents
-from insightforge.infrastructure.search.http import create_http_client, require_query
+from insightforge.infrastructure.search.http import (
+    close_http_client,
+    create_http_client,
+    require_query,
+)
 from insightforge.infrastructure.search.providers import (
     ArxivSearchProvider,
     GitHubSearchProvider,
@@ -62,6 +67,10 @@ class SearchService:
 
     Pipeline: rate-limit → parallel fetch → dedupe → score → trim.
     Provider failures are logged and skipped so one outage does not abort the run.
+
+    When constructed via ``create_search_service`` without an injected client,
+    this service owns the shared ``httpx.Client`` and closes it on ``close()``
+    or context-manager exit.
     """
 
     def __init__(
@@ -74,6 +83,8 @@ class SearchService:
         dedupe: bool = True,
         scoring: bool = True,
         max_documents: int = 20,
+        client: httpx.Client | None = None,
+        owns_client: bool = False,
     ) -> None:
         self._providers = dict(providers)
         self._default_limit = default_limit
@@ -82,13 +93,45 @@ class SearchService:
         self._dedupe = dedupe
         self._scoring = scoring
         self._max_documents = max(1, max_documents)
+        self._client = client
+        self._owns_client = owns_client and client is not None
 
     @property
     def providers(self) -> dict[SearchProviderHint, SearchProvider]:
         return dict(self._providers)
 
+    @property
+    def client(self) -> httpx.Client | None:
+        """Shared HTTP client when one is managed by this service."""
+
+        return self._client
+
+    @property
+    def owns_client(self) -> bool:
+        return self._owns_client
+
     def get_provider(self, hint: SearchProviderHint) -> SearchProvider | None:
         return self._providers.get(hint)
+
+    def close(self) -> None:
+        """Close the owned HTTP client, if any. Idempotent."""
+
+        if not self._owns_client:
+            return
+        close_http_client(self._client)
+        self._client = None
+        self._owns_client = False
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
 
     def search(
         self,
@@ -157,7 +200,7 @@ class SearchService:
         *,
         limit: int | None = None,
     ) -> list[Document]:
-        """Search using a planner ``ResearchTask``."""
+        """Search using a domain ``ResearchTask``."""
 
         logger.info(
             "search task id=%s priority=%d providers=%s",
@@ -174,7 +217,7 @@ class SearchService:
         *,
         limit: int | None = None,
     ) -> list[Document]:
-        """Run multiple planner tasks, then dedupe/score once across all hits."""
+        """Run multiple research tasks, scoring each against its own query."""
 
         if not tasks:
             return []
@@ -196,13 +239,30 @@ class SearchService:
                 [hint.value for hint in hints],
                 extra={"task_id": task.id, "priority": task.priority},
             )
-            merged.extend(self._fetch_parallel(query, hints, max_results))
+            hits = self._fetch_parallel(query, hints, max_results)
+            if self._scoring:
+                hits = score_documents(hits, query)
+            merged.extend(hits)
 
         before = len(merged)
         if self._dedupe:
             merged = dedupe_documents(merged)
-        if self._scoring:
-            merged = score_documents(merged, ordered[0].search_query)
+            # Dedupe may reorder; prefer higher application scores when present.
+            merged = sorted(
+                merged,
+                key=lambda doc: (
+                    doc.score if doc.score is not None else -1.0,
+                    len(doc.snippet) + len(doc.content),
+                ),
+                reverse=True,
+            )
+        elif self._scoring:
+            merged = sorted(
+                merged,
+                key=lambda doc: doc.score or 0.0,
+                reverse=True,
+            )
+
         if len(merged) > self._max_documents:
             merged = merged[: self._max_documents]
 
@@ -282,9 +342,14 @@ def create_search_service(
     *,
     client: httpx.Client | None = None,
 ) -> SearchService:
-    """Factory used by application code and tests."""
+    """Factory used by application code and tests.
+
+    When ``client`` is omitted, the service owns the created HTTP client and
+    callers should use ``close()`` or a ``with`` block to release it.
+    """
 
     cfg = settings or get_settings()
+    owns_client = client is None
     http_client = client or create_http_client(timeout=cfg.search_timeout_seconds)
     limiter = RateLimiter(calls_per_second=cfg.search_rate_limit_per_second)
     return SearchService(
@@ -295,4 +360,6 @@ def create_search_service(
         dedupe=cfg.search_dedupe_enabled,
         scoring=cfg.search_scoring_enabled,
         max_documents=cfg.search_max_documents,
+        client=http_client,
+        owns_client=owns_client,
     )

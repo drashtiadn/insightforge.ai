@@ -1,6 +1,6 @@
 """Graph nodes — each function does one step and returns state updates.
 
-``plan_node`` uses the ``Planner`` interface. ``retrieve_node`` can pull real
+``plan_node`` uses the ``Planner`` interface. ``search_node`` can pull real
 documents via ``SearchService`` when tasks exist; otherwise it uses the stub
 fetcher so CI stays offline. Unexpected errors are recorded in state so the
 graph can recover instead of crashing.
@@ -13,11 +13,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from insightforge.agents import Planner, SimplePlanner
-from insightforge.agents.planner.schemas import ResearchTask
 from insightforge.core.exceptions import ValidationFailedError
 from insightforge.core.logging import get_logger
+from insightforge.domain.models import ResearchTask
 from insightforge.graph.retry import call_with_retry
-from insightforge.graph.state import GraphState
+from insightforge.graph.state import AUTO_MAX_STEPS, GraphState
 from insightforge.infrastructure.search import SearchService
 
 logger = get_logger(__name__)
@@ -50,19 +50,29 @@ def plan_node(
         )
         return {"errors": [exc.message], **_move(state, "failed")}
 
+    task_count = len(research_plan.tasks)
+    # Auto budget: run every planned task. Explicit max_steps stays a hard cap.
+    if state["max_steps"] == AUTO_MAX_STEPS:
+        resolved_max_steps = task_count or 1
+    else:
+        resolved_max_steps = state["max_steps"]
+
     logger.info(
-        "plan node complete intent=%s task_count=%d",
+        "plan node complete intent=%s task_count=%d max_steps=%d",
         research_plan.intent.value,
-        len(research_plan.tasks),
+        task_count,
+        resolved_max_steps,
         extra={
             "intent": research_plan.intent.value,
-            "task_count": len(research_plan.tasks),
+            "task_count": task_count,
+            "max_steps": resolved_max_steps,
         },
     )
     return {
         "plan": research_plan.steps,
         "intent": research_plan.intent.value,
         "tasks": [task.model_dump(mode="json") for task in research_plan.tasks],
+        "max_steps": resolved_max_steps,
         **_move(state, "plan"),
     }
 
@@ -109,12 +119,12 @@ def _task_for_step(state: GraphState) -> ResearchTask | None:
         return None
 
 
-def retrieve_node(
+def search_node(
     state: GraphState,
     *,
     search_service: SearchService | None = None,
 ) -> dict[str, Any]:
-    """Attach sources for this step.
+    """Run external search (or the offline stub) for this step's task.
 
     When ``search_service`` is provided and planner tasks exist, runs the
     Phase 3 search pipeline (parallel / dedupe / score / rate-limit).
@@ -130,21 +140,21 @@ def retrieve_node(
             )
         except Exception as exc:
             return {
-                "errors": [f"retrieve failed: {exc}"],
+                "errors": [f"search failed: {exc}"],
                 **_move(state, "failed"),
             }
 
         serialized = [doc.model_dump(mode="json") for doc in documents]
         sources = [{"title": doc.title, "url": doc.url} for doc in documents]
         logger.info(
-            "retrieve via search task_id=%s document_count=%d",
+            "search node task_id=%s document_count=%d",
             task.id,
             len(documents),
         )
         return {
             "documents": serialized,
             "sources": sources,
-            **_move(state, "retrieve"),
+            **_move(state, "search"),
         }
 
     try:
@@ -155,11 +165,11 @@ def retrieve_node(
     except Exception as exc:
         # Soft failure: keep going so the graph can recover with partial data.
         return {
-            "errors": [f"retrieve failed: {exc}"],
+            "errors": [f"search failed: {exc}"],
             **_move(state, "failed"),
         }
 
-    return {"sources": [source], **_move(state, "retrieve")}
+    return {"sources": [source], **_move(state, "search")}
 
 
 def evaluate_node(state: GraphState) -> dict[str, Any]:
