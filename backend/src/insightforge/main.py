@@ -16,12 +16,14 @@ from insightforge.api.v1 import api_router
 from insightforge.core.config import get_settings
 from insightforge.core.exceptions import register_exception_handlers
 from insightforge.core.logging import configure_logging
+from insightforge.infrastructure.tracing import configure_tracing
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Startup and shutdown hooks for shared resources (DB, clients, etc.)."""
 
+    configure_tracing()
     yield
 
 
@@ -29,12 +31,15 @@ def create_app() -> FastAPI:
     """Create the FastAPI app with logging, middleware, and routes wired."""
 
     settings = get_settings()
-    configure_logging(settings.log_level, json_logs=settings.is_production)
+    # DEBUG=true in settings makes logs noisier; FastAPI debug stays off so
+    # clients always get structured JSON errors (never raw tracebacks).
+    log_level = "DEBUG" if settings.debug else settings.log_level
+    configure_logging(log_level, json_logs=settings.is_production)
 
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        debug=settings.debug,
+        debug=False,
         lifespan=lifespan,
     )
     register_middleware(app, settings)

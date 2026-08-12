@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from insightforge.api.middleware.request_context import bind_request_context
 from insightforge.core.logging import request_id_var
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -28,6 +29,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid.uuid4())
+        bind_request_context(request, request_id)
         token = request_id_var.set(request_id)
         try:
             response = await call_next(request)

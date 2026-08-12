@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
 
+    # LangSmith observability (https://smith.langchain.com)
+    langsmith_tracing: bool = False
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "insightforge"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+
     @property
     def is_production(self) -> bool:
         return self.app_env == Environment.PRODUCTION
