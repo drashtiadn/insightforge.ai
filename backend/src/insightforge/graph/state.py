@@ -22,9 +22,17 @@ class GraphState(TypedDict):
     errors: Annotated[list[str], add]
     step: int
     max_steps: int
+    max_retries: int
+    phase: str
+    transitions: Annotated[list[str], add]
 
 
-def initial_state(query: str, *, max_steps: int = 2) -> GraphState:
+def initial_state(
+    query: str,
+    *,
+    max_steps: int = 2,
+    max_retries: int = 3,
+) -> GraphState:
     """Starting values for a new research run."""
 
     return {
@@ -37,4 +45,7 @@ def initial_state(query: str, *, max_steps: int = 2) -> GraphState:
         "errors": [],
         "step": 0,
         "max_steps": max_steps,
+        "max_retries": max_retries,
+        "phase": "init",
+        "transitions": [],
     }

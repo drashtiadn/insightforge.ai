@@ -71,9 +71,11 @@ def test_plan_node_accepts_custom_planner() -> None:
             return [f"fixed:{query}"]
 
     result = plan_node(initial_state("q"), planner=FixedPlanner())
-    assert result == {"plan": ["fixed:q"]}
+    assert result["plan"] == ["fixed:q"]
+    assert result["phase"] == "plan"
 
 
 def test_plan_node_maps_validation_to_errors() -> None:
     result = plan_node(initial_state("  "))
-    assert result == {"errors": ["query must not be empty"]}
+    assert result["errors"] == ["query must not be empty"]
+    assert result["phase"] == "failed"
