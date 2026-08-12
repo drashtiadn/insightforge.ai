@@ -75,3 +75,11 @@ class ValidationFailedError(AppException):
     code = "validation_failed"
     message = "Validation failed"
     status_code = 422
+
+
+class ExternalServiceError(AppException):
+    """Upstream dependency failed (502)."""
+
+    code = "external_service_error"
+    message = "External service error"
+    status_code = 502
