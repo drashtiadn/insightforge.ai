@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from insightforge.domain.models import Document
+from insightforge.domain.models import Document, ResearchTask
 from insightforge.graph import (
     call_with_retry,
     fetch_source,
@@ -158,6 +158,76 @@ def test_run_research_recovers_after_search_failure(
     # Research notes were kept; sources could not be fetched.
     assert result.state["notes"]
     assert result.state["sources"] == []
+
+
+def test_search_node_retries_when_all_providers_time_out() -> None:
+    """SearchService total outages must hit max_retries, not fake empty success."""
+
+    class _Flaky(SearchProvider):
+        name = SearchProviderHint.WIKIPEDIA
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def search(self, query: str, *, limit: int = 5) -> list[Document]:
+            self.calls += 1
+            if self.calls < 3:
+                raise TimeoutError("transient")
+            return [
+                Document(
+                    title="Recovered",
+                    url="https://example.com/recovered",
+                    snippet=query,
+                    provider=SearchProviderHint.WIKIPEDIA,
+                )
+            ]
+
+    provider = _Flaky()
+    service = SearchService({SearchProviderHint.WIKIPEDIA: provider}, scoring=False)
+    task = ResearchTask(
+        id="t1",
+        description="background",
+        search_query="photosynthesis",
+        providers=[SearchProviderHint.WIKIPEDIA],
+        priority=1,
+    )
+    state = initial_state("what is photosynthesis", max_retries=3)
+    state["step"] = 1
+    state["phase"] = "research"
+    state["tasks"] = [task.model_dump(mode="json")]
+
+    result = search_node(state, search_service=service)
+
+    assert provider.calls == 3
+    assert result["phase"] == "search"
+    assert "errors" not in result
+    assert result["documents"][0]["title"] == "Recovered"
+
+
+def test_run_research_marks_failure_when_search_providers_all_fail() -> None:
+    class _Boom(SearchProvider):
+        def __init__(self, name: SearchProviderHint) -> None:
+            self.name = name
+
+        def search(self, query: str, *, limit: int = 5) -> list[Document]:
+            raise TimeoutError("all providers down")
+
+    service = SearchService(
+        {hint: _Boom(hint) for hint in SearchProviderHint},
+        scoring=False,
+    )
+    result = run_research(
+        "what is photosynthesis",
+        max_steps=1,
+        max_retries=2,
+        search_service=service,
+    )
+
+    assert result.phase == "done"
+    assert not result.ok
+    assert any("search failed" in err for err in result.errors)
+    assert result.state["sources"] == []
+    assert result.state["documents"] == []
 
 
 def test_run_research_injects_and_closes_default_search_service(

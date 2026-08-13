@@ -34,6 +34,17 @@ from insightforge.shared.enums import SearchProviderHint
 
 logger = get_logger(__name__)
 
+# Mirrored from graph.retry.RETRYABLE so search can surface transient total
+# outages without importing the graph package (layering).
+_RETRYABLE_FETCH = (
+    TimeoutError,
+    ConnectionError,
+    OSError,
+    httpx.TimeoutException,
+    httpx.NetworkError,
+    httpx.RemoteProtocolError,
+)
+
 
 def build_providers(
     settings: Settings,
@@ -66,7 +77,11 @@ class SearchService:
     """Execute searches across providers with a production-ready pipeline.
 
     Pipeline: rate-limit → parallel fetch → dedupe → score → trim.
-    Provider failures are logged and skipped so one outage does not abort the run.
+    Individual provider failures are logged and skipped so one outage does
+    not abort the run when others succeed. If every attempted provider fails
+    and no documents were returned, the failure is re-raised so callers
+    (e.g. graph ``call_with_retry``) can retry transient errors instead of
+    treating a total outage as an empty successful search.
 
     When constructed via ``create_search_service`` without an injected client,
     this service owns the shared ``httpx.Client`` and closes it on ``close()``
@@ -299,6 +314,7 @@ class SearchService:
             return []
 
         documents: list[Document] = []
+        failures: list[BaseException] = []
         workers = min(self._max_workers, len(runnable))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(self._search_one, hint, query, limit): hint for hint in runnable}
@@ -313,6 +329,7 @@ class SearchService:
                         exc,
                         extra={"provider": hint.value},
                     )
+                    failures.append(exc)
                     continue
                 logger.debug(
                     "search provider ok provider=%s count=%d",
@@ -320,6 +337,14 @@ class SearchService:
                     len(hits),
                 )
                 documents.extend(hits)
+
+        if not documents and failures:
+            # Total failure with zero hits — do not disguise as empty success.
+            # Prefer a retryable error so graph-level retries can recover.
+            for exc in failures:
+                if isinstance(exc, _RETRYABLE_FETCH):
+                    raise exc
+            raise failures[0]
         return documents
 
     def _search_one(

@@ -35,18 +35,22 @@ class _FakeProvider(SearchProvider):
         *,
         delay: float = 0.0,
         fail: bool = False,
+        fail_with: BaseException | None = None,
         calls: list[str] | None = None,
     ) -> None:
         self.name = name
         self._docs = docs
         self._delay = delay
         self._fail = fail
+        self._fail_with = fail_with
         self._calls = calls if calls is not None else []
 
     def search(self, query: str, *, limit: int = 5) -> list[Document]:
         self._calls.append(self.name.value)
         if self._delay:
             time.sleep(self._delay)
+        if self._fail_with is not None:
+            raise self._fail_with
         if self._fail:
             raise RuntimeError(f"{self.name.value} boom")
         return self._docs[:limit]
@@ -235,6 +239,39 @@ def test_search_service_soft_fails_and_dedupes() -> None:
     assert len(docs) == 2
     urls = {doc.url for doc in docs}
     assert urls == {"https://example.com/x", "https://example.com/y"}
+
+
+def test_search_service_total_provider_failure_raises() -> None:
+    """All providers failing must not look like an empty successful search."""
+
+    providers = {
+        SearchProviderHint.WEB: _FakeProvider(
+            SearchProviderHint.WEB,
+            [],
+            fail_with=TimeoutError("web down"),
+        ),
+        SearchProviderHint.WIKIPEDIA: _FakeProvider(
+            SearchProviderHint.WIKIPEDIA,
+            [],
+            fail_with=TimeoutError("wiki down"),
+        ),
+    }
+    service = SearchService(providers, scoring=False, dedupe=False)
+    with pytest.raises(TimeoutError, match="down"):
+        service.search(
+            "photosynthesis",
+            [SearchProviderHint.WEB, SearchProviderHint.WIKIPEDIA],
+        )
+
+
+def test_search_service_empty_results_without_failures_ok() -> None:
+    """Legitimate zero-hit responses are still empty success."""
+
+    providers = {
+        SearchProviderHint.WEB: _FakeProvider(SearchProviderHint.WEB, []),
+    }
+    service = SearchService(providers, scoring=False, dedupe=False)
+    assert service.search("obscure-query-xyz", [SearchProviderHint.WEB]) == []
 
 
 def test_search_service_trims_to_max_documents() -> None:
