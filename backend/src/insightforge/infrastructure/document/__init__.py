@@ -1,6 +1,16 @@
-"""Document processing infrastructure — parsers and cleaning for research sources."""
+"""Document processing infrastructure — parsers, cleaning, and chunking."""
 
 from insightforge.infrastructure.document.base import DocumentParser
+from insightforge.infrastructure.document.chunking import (
+    ChunkConfig,
+    DocumentChunker,
+    EmbedFn,
+    MarkdownAwareChunker,
+    RecursiveCharacterChunker,
+    SemanticChunker,
+    chunk_document,
+    parse_chunk_strategy,
+)
 from insightforge.infrastructure.document.cleaning import (
     clean_document,
     extract_text_metadata,
@@ -23,19 +33,27 @@ from insightforge.infrastructure.document.service import (
 )
 
 __all__ = [
+    "ChunkConfig",
+    "DocumentChunker",
     "DocumentParseService",
     "DocumentParser",
+    "EmbedFn",
     "HtmlDocumentParser",
     "JsonDocumentParser",
+    "MarkdownAwareChunker",
     "MarkdownDocumentParser",
     "OcrDocumentParser",
     "ParseRequest",
     "PdfDocumentParser",
+    "RecursiveCharacterChunker",
+    "SemanticChunker",
     "build_parsers",
+    "chunk_document",
     "clean_document",
     "create_document_parse_service",
     "detect_content_type",
     "extract_text_metadata",
     "normalize_text",
+    "parse_chunk_strategy",
     "remove_boilerplate",
 ]

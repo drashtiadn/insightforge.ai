@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     # Document processing (Phase 4)
     tesseract_cmd: str | None = None  # optional path to the tesseract binary
     document_cleaning_enabled: bool = True
+    document_chunking_enabled: bool = True
+    document_chunk_strategy: str = "auto"  # auto | recursive | markdown | semantic
+    document_chunk_size: int = 1200
+    document_chunk_overlap: int = 150
+    document_semantic_threshold: float = 0.25
 
     @property
     def is_production(self) -> bool:

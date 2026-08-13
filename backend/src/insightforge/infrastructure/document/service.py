@@ -10,8 +10,14 @@ from pydantic import BaseModel, Field
 from insightforge.core.config import Settings, get_settings
 from insightforge.core.exceptions import ValidationFailedError
 from insightforge.core.logging import get_logger
-from insightforge.domain.models import Document, ParsedDocument
+from insightforge.domain.models import Document, DocumentChunk, ParsedDocument
 from insightforge.infrastructure.document.base import DocumentParser
+from insightforge.infrastructure.document.chunking import (
+    ChunkConfig,
+    EmbedFn,
+    chunk_document,
+    parse_chunk_strategy,
+)
 from insightforge.infrastructure.document.cleaning import clean_document
 from insightforge.infrastructure.document.detect import detect_content_type
 from insightforge.infrastructure.document.parsers import (
@@ -22,7 +28,7 @@ from insightforge.infrastructure.document.parsers import (
     PdfDocumentParser,
 )
 from insightforge.infrastructure.document.parsers.ocr import OcrExtractFn
-from insightforge.shared.enums import ContentType
+from insightforge.shared.enums import ChunkStrategy, ContentType
 
 logger = get_logger(__name__)
 
@@ -57,10 +63,21 @@ def build_parsers(
     ]
 
 
+def chunk_config_from_settings(settings: Settings) -> ChunkConfig:
+    """Build chunking options from application settings."""
+
+    return ChunkConfig(
+        chunk_size=settings.document_chunk_size,
+        chunk_overlap=settings.document_chunk_overlap,
+        strategy=parse_chunk_strategy(settings.document_chunk_strategy),
+        semantic_threshold=settings.document_semantic_threshold,
+    )
+
+
 class DocumentParseService:
     """Route raw documents to the matching format parser.
 
-    Pipeline: detect → parse → optional clean (Phase 4.2).
+    Pipeline: detect → parse → optional clean (Phase 4.2) → optional chunk (4.3).
     Unknown formats and unavailable parsers raise ``ValidationFailedError`` for a
     single ``parse`` call. ``parse_many`` soft-fails per item so one bad source
     does not abort the batch.
@@ -71,9 +88,15 @@ class DocumentParseService:
         parsers: Sequence[DocumentParser],
         *,
         cleaning: bool = True,
+        chunking: bool = True,
+        chunk_config: ChunkConfig | None = None,
+        embed_text: EmbedFn | None = None,
     ) -> None:
         self._parsers = list(parsers)
         self._cleaning = cleaning
+        self._chunking = chunking
+        self._chunk_config = chunk_config or ChunkConfig()
+        self._embed_text = embed_text
 
     @property
     def parsers(self) -> list[DocumentParser]:
@@ -82,6 +105,14 @@ class DocumentParseService:
     @property
     def cleaning(self) -> bool:
         return self._cleaning
+
+    @property
+    def chunking(self) -> bool:
+        return self._chunking
+
+    @property
+    def chunk_config(self) -> ChunkConfig:
+        return self._chunk_config
 
     def get_parser(self, content_type: ContentType) -> DocumentParser | None:
         for parser in self._parsers:
@@ -173,6 +204,52 @@ class DocumentParseService:
         )
         return parsed
 
+    def chunk(
+        self,
+        document: ParsedDocument,
+        *,
+        strategy: ChunkStrategy | str | None = None,
+    ) -> list[DocumentChunk]:
+        """Split a parsed document into structured chunks."""
+
+        return chunk_document(
+            document,
+            config=self._chunk_config,
+            strategy=strategy,
+            embed_text=self._embed_text,
+        )
+
+    def parse_and_chunk(
+        self,
+        raw: bytes | str,
+        *,
+        content_type: str | None = None,
+        filename: str | None = None,
+        url: str | None = None,
+        title: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        cleaning: bool | None = None,
+        strategy: ChunkStrategy | str | None = None,
+    ) -> list[DocumentChunk]:
+        """Parse (and optionally clean) a payload, then return structured chunks."""
+
+        parsed = self.parse(
+            raw,
+            content_type=content_type,
+            filename=filename,
+            url=url,
+            title=title,
+            metadata=metadata,
+            cleaning=cleaning,
+        )
+        chunks = self.chunk(parsed, strategy=strategy)
+        logger.info(
+            "document parse_and_chunk finished parser=%s chunks=%d",
+            parsed.content_type.value,
+            len(chunks),
+        )
+        return chunks
+
     def parse_source(
         self,
         document: Document,
@@ -237,11 +314,46 @@ class DocumentParseService:
         )
         return results
 
+    def parse_and_chunk_many(self, requests: Sequence[ParseRequest]) -> list[DocumentChunk]:
+        """Parse and chunk many payloads; skip items that fail."""
+
+        logger.info("document parse_and_chunk_many started count=%d", len(requests))
+        chunks: list[DocumentChunk] = []
+        failed = 0
+        for index, request in enumerate(requests):
+            try:
+                chunks.extend(
+                    self.parse_and_chunk(
+                        request.raw,
+                        content_type=request.content_type,
+                        filename=request.filename,
+                        url=request.url,
+                        title=request.title,
+                        metadata=request.metadata or None,
+                    )
+                )
+            except Exception as exc:
+                failed += 1
+                logger.warning(
+                    "document parse_and_chunk_many item failed index=%d error=%s",
+                    index,
+                    exc,
+                    extra={"index": index},
+                )
+                continue
+        logger.info(
+            "document parse_and_chunk_many finished chunks=%d failed=%d",
+            len(chunks),
+            failed,
+        )
+        return chunks
+
 
 def create_document_parse_service(
     settings: Settings | None = None,
     *,
     ocr_extract_text: OcrExtractFn | None = None,
+    embed_text: EmbedFn | None = None,
 ) -> DocumentParseService:
     """Factory used by application code and tests."""
 
@@ -252,6 +364,9 @@ def create_document_parse_service(
             ocr_extract_text=ocr_extract_text,
         ),
         cleaning=cfg.document_cleaning_enabled,
+        chunking=cfg.document_chunking_enabled,
+        chunk_config=chunk_config_from_settings(cfg),
+        embed_text=embed_text,
     )
 
 
