@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     document_chunk_size: int = 1200
     document_chunk_overlap: int = 150
     document_semantic_threshold: float = 0.25
+    document_citation_enabled: bool = True
 
     @property
     def is_production(self) -> bool:

@@ -16,6 +16,8 @@ logger = get_logger(__name__)
 
 _CONTENT_KEYS = ("content", "text", "body", "markdown", "html", "article")
 _TITLE_KEYS = ("title", "name", "headline")
+_AUTHOR_KEYS = ("author", "authors", "by")
+_DATE_KEYS = ("date", "published", "published_at", "created", "created_at")
 
 
 def _first_string(data: dict[str, Any], keys: tuple[str, ...]) -> str | None:
@@ -45,6 +47,19 @@ def _flatten(value: Any, *, prefix: str = "") -> list[str]:
     label = prefix or "value"
     lines.append(f"{label}: {value}")
     return lines
+
+
+def _json_author_date(data: Any) -> tuple[str | None, str | None]:
+    if not isinstance(data, dict):
+        return None, None
+    author = _first_string(data, _AUTHOR_KEYS)
+    if author is None:
+        raw_authors = data.get("authors")
+        if isinstance(raw_authors, list):
+            names = [str(item).strip() for item in raw_authors if str(item).strip()]
+            author = "; ".join(names) or None
+    published = _first_string(data, _DATE_KEYS)
+    return author, published
 
 
 def _json_to_text(data: Any) -> tuple[str, str | None]:
@@ -89,12 +104,15 @@ class JsonDocumentParser(DocumentParser):
 
         text, inferred_title = _json_to_text(data)
         page_title = title or inferred_title
+        author, published = _json_author_date(data)
         metadata = merge_metadata(
             parser=self.name.value,
             filename=filename,
             extra=extra_metadata,
             extracted={
                 "root_type": type(data).__name__,
+                "author": author,
+                "date": published,
                 "char_count": len(text),
             },
         )

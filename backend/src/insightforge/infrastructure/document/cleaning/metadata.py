@@ -1,7 +1,6 @@
 """Light metadata extraction from cleaned document text (Phase 4.2).
 
-Citation structuring (canonical author/date/title objects) is Phase 4.4.
-This step only fills missing metadata fields discovered in the text body.
+Fills missing author/date/url fields for later citation structuring (Phase 4.4).
 """
 
 from __future__ import annotations

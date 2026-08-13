@@ -18,6 +18,7 @@ from insightforge.infrastructure.document.chunking import (
     chunk_document,
     parse_chunk_strategy,
 )
+from insightforge.infrastructure.document.citation import cite_chunks, cite_document
 from insightforge.infrastructure.document.cleaning import clean_document
 from insightforge.infrastructure.document.detect import detect_content_type
 from insightforge.infrastructure.document.parsers import (
@@ -77,7 +78,7 @@ def chunk_config_from_settings(settings: Settings) -> ChunkConfig:
 class DocumentParseService:
     """Route raw documents to the matching format parser.
 
-    Pipeline: detect → parse → optional clean (Phase 4.2) → optional chunk (4.3).
+    Pipeline: detect → parse → optional clean (4.2) → cite (4.4) → optional chunk (4.3).
     Unknown formats and unavailable parsers raise ``ValidationFailedError`` for a
     single ``parse`` call. ``parse_many`` soft-fails per item so one bad source
     does not abort the batch.
@@ -89,12 +90,14 @@ class DocumentParseService:
         *,
         cleaning: bool = True,
         chunking: bool = True,
+        citation: bool = True,
         chunk_config: ChunkConfig | None = None,
         embed_text: EmbedFn | None = None,
     ) -> None:
         self._parsers = list(parsers)
         self._cleaning = cleaning
         self._chunking = chunking
+        self._citation = citation
         self._chunk_config = chunk_config or ChunkConfig()
         self._embed_text = embed_text
 
@@ -109,6 +112,10 @@ class DocumentParseService:
     @property
     def chunking(self) -> bool:
         return self._chunking
+
+    @property
+    def citation(self) -> bool:
+        return self._citation
 
     @property
     def chunk_config(self) -> ChunkConfig:
@@ -169,6 +176,7 @@ class DocumentParseService:
         title: str | None = None,
         metadata: dict[str, Any] | None = None,
         cleaning: bool | None = None,
+        citation: bool | None = None,
     ) -> ParsedDocument:
         """Parse a single raw payload into a ``ParsedDocument``."""
 
@@ -195,11 +203,15 @@ class DocumentParseService:
         apply_cleaning = self._cleaning if cleaning is None else cleaning
         if apply_cleaning:
             parsed = clean_document(parsed)
+        apply_citation = self._citation if citation is None else citation
+        if apply_citation:
+            parsed = cite_document(parsed)
         logger.info(
-            "document parse finished parser=%s chars=%d cleaned=%s",
+            "document parse finished parser=%s chars=%d cleaned=%s cited=%s",
             parser.name.value,
             len(parsed.text),
             apply_cleaning,
+            apply_citation,
             extra={"parser": parser.name.value, "char_count": len(parsed.text)},
         )
         return parsed
@@ -209,15 +221,20 @@ class DocumentParseService:
         document: ParsedDocument,
         *,
         strategy: ChunkStrategy | str | None = None,
+        citation: bool | None = None,
     ) -> list[DocumentChunk]:
         """Split a parsed document into structured chunks."""
 
-        return chunk_document(
+        chunks = chunk_document(
             document,
             config=self._chunk_config,
             strategy=strategy,
             embed_text=self._embed_text,
         )
+        apply_citation = self._citation if citation is None else citation
+        if apply_citation:
+            chunks = cite_chunks(chunks, document)
+        return chunks
 
     def parse_and_chunk(
         self,
@@ -229,6 +246,7 @@ class DocumentParseService:
         title: str | None = None,
         metadata: dict[str, Any] | None = None,
         cleaning: bool | None = None,
+        citation: bool | None = None,
         strategy: ChunkStrategy | str | None = None,
     ) -> list[DocumentChunk]:
         """Parse (and optionally clean) a payload, then return structured chunks."""
@@ -241,8 +259,9 @@ class DocumentParseService:
             title=title,
             metadata=metadata,
             cleaning=cleaning,
+            citation=citation,
         )
-        chunks = self.chunk(parsed, strategy=strategy)
+        chunks = self.chunk(parsed, strategy=strategy, citation=citation)
         logger.info(
             "document parse_and_chunk finished parser=%s chunks=%d",
             parsed.content_type.value,
@@ -256,6 +275,7 @@ class DocumentParseService:
         *,
         raw: bytes | str | None = None,
         cleaning: bool | None = None,
+        citation: bool | None = None,
     ) -> ParsedDocument:
         """Parse payload associated with a search ``Document``."""
 
@@ -280,6 +300,7 @@ class DocumentParseService:
             title=document.title,
             metadata=meta,
             cleaning=cleaning,
+            citation=citation,
         )
 
     def parse_many(self, requests: Sequence[ParseRequest]) -> list[ParsedDocument]:
@@ -365,6 +386,7 @@ def create_document_parse_service(
         ),
         cleaning=cfg.document_cleaning_enabled,
         chunking=cfg.document_chunking_enabled,
+        citation=cfg.document_citation_enabled,
         chunk_config=chunk_config_from_settings(cfg),
         embed_text=embed_text,
     )
