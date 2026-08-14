@@ -84,7 +84,7 @@ line-ending = "auto"
 # MyPy — static type checking
 # ---------------------------------------------------------------------------
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -102,6 +102,11 @@ packages = ["insightforge"]
 [[tool.mypy.overrides]]
 module = ["pytesseract", "sentence_transformers"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*", "qdrant_client", "qdrant_client.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
 
 # ---------------------------------------------------------------------------
 # Pytest
