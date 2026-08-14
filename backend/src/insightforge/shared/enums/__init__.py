@@ -28,7 +28,28 @@ class SearchProviderHint(StrEnum):
     REDDIT = "reddit"
 
 
+class ContentType(StrEnum):
+    """Document content formats handled by Phase 4 parsers."""
+
+    HTML = "html"
+    MARKDOWN = "markdown"
+    PDF = "pdf"
+    OCR = "ocr"
+    JSON = "json"
+
+
+class ChunkStrategy(StrEnum):
+    """Chunking strategies for Phase 4.3."""
+
+    AUTO = "auto"
+    RECURSIVE = "recursive"
+    MARKDOWN = "markdown"
+    SEMANTIC = "semantic"
+
+
 __all__ = [
+    "ChunkStrategy",
+    "ContentType",
     "QueryIntent",
     "SearchProviderHint",
 ]
