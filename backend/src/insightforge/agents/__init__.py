@@ -8,6 +8,7 @@ from insightforge.agents.planner import (
     ResearchTask,
     SimplePlanner,
 )
+from insightforge.agents.reranker import SimpleReranker
 from insightforge.agents.retriever import SimpleRetriever
 from insightforge.agents.tools import FunctionTool, Tool
 
@@ -19,6 +20,7 @@ __all__ = [
     "ResearchPlan",
     "ResearchTask",
     "SimplePlanner",
+    "SimpleReranker",
     "SimpleRetriever",
     "Tool",
 ]

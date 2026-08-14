@@ -76,12 +76,21 @@ class RetrievalMode(StrEnum):
     HYBRID = "hybrid"
 
 
+class RerankerHint(StrEnum):
+    """Reranker backends for Phase 5.4."""
+
+    CROSS_ENCODER = "cross-encoder"
+    BGE = "bge"
+    JINA = "jina"
+
+
 __all__ = [
     "ChunkStrategy",
     "ContentType",
     "EmbeddingInputType",
     "EmbeddingProviderHint",
     "QueryIntent",
+    "RerankerHint",
     "RetrievalMode",
     "SearchProviderHint",
     "VectorStoreHint",

@@ -19,3 +19,5 @@ class RetrievalHit(BaseModel):
     mode: RetrievalMode
     semantic_rank: int | None = Field(default=None, ge=1)
     bm25_rank: int | None = Field(default=None, ge=1)
+    retrieval_score: float | None = None
+    rerank_rank: int | None = Field(default=None, ge=1)

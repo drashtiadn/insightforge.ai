@@ -112,6 +112,15 @@ class Settings(BaseSettings):
     retrieval_bm25_k1: float = 1.5
     retrieval_bm25_b: float = 0.75
 
+    # Reranking (Phase 5.4)
+    jina_api_key: SecretStr | None = None
+    reranker_provider: str = "cross-encoder"  # cross-encoder | bge | jina
+    reranker_cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_bge_model: str = "BAAI/bge-reranker-base"
+    reranker_jina_model: str = "jina-reranker-v2-base-multilingual"
+    reranker_timeout_seconds: float = 30.0
+    reranker_top_n: int | None = None
+
     @property
     def is_production(self) -> bool:
         return self.app_env == Environment.PRODUCTION
