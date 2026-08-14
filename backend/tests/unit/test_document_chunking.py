@@ -139,6 +139,24 @@ def test_semantic_lexical_splits_on_topic_shift() -> None:
     assert chunks[0].metadata["embedder"] == "lexical"
 
 
+def test_semantic_chunk_offsets_match_source_with_blank_lines() -> None:
+    """Groups must stay contiguous source slices — blank lines must not invent text."""
+
+    text = (
+        "Alpha sentence one. Beta sentence two.\n\n"
+        "Gamma sentence three. Delta sentence four."
+    )
+    chunks = SemanticChunker(
+        ChunkConfig(chunk_size=200, chunk_overlap=20, semantic_threshold=0.0)
+    ).chunk(_doc(text))
+
+    assert chunks
+    for chunk in chunks:
+        assert text[chunk.start : chunk.end] == chunk.text
+        assert chunk.text in text
+        assert chunk.end <= len(text)
+
+
 def test_semantic_chunker_uses_injected_embeddings() -> None:
     def embed(texts: Sequence[str]) -> list[list[float]]:
         vectors: list[list[float]] = []

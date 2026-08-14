@@ -20,12 +20,18 @@ logger = get_logger(__name__)
 
 EmbedFn = Callable[[Sequence[str]], Sequence[Sequence[float]]]
 
+# Sentence row: (text, start, end) offsets into the source document.
+_Sentence = tuple[str, int, int]
+
 
 class SemanticChunker(DocumentChunker):
     """Group adjacent sentences that stay on the same topic.
 
     When ``embed_text`` is provided, adjacent-group cosine similarity is used.
     Otherwise a lexical Jaccard fallback is used (no extra model dependency).
+
+    Group text is always a contiguous slice of the source document so chunk
+    ``start`` / ``end`` offsets remain accurate for citation highlighting.
     """
 
     name = ChunkStrategy.SEMANTIC
@@ -50,7 +56,7 @@ class SemanticChunker(DocumentChunker):
             return []
 
         vectors = self._embed_sentences([item[0] for item in sentences])
-        groups = self._group(sentences, vectors)
+        groups = self._group(text, sentences, vectors)
         chunks = build_chunks(
             document,
             [(group, None) for group in groups],
@@ -91,7 +97,8 @@ class SemanticChunker(DocumentChunker):
 
     def _group(
         self,
-        sentences: list[tuple[str, int, int]],
+        source: str,
+        sentences: list[_Sentence],
         vectors: list[list[float]] | None,
     ) -> list[str]:
         chunk_size = self.config.chunk_size
@@ -100,16 +107,21 @@ class SemanticChunker(DocumentChunker):
         min_keep = max(1, chunk_size // 4)
 
         groups: list[str] = []
-        current: list[str] = []
+        # Indices into ``sentences`` for the in-progress group.
+        current: list[int] = []
         current_vecs: list[list[float]] = []
 
-        def joined_text(parts: list[str]) -> str:
-            return " ".join(parts).strip()
+        def span_text(indices: list[int]) -> str:
+            if not indices:
+                return ""
+            start = sentences[indices[0]][1]
+            end = sentences[indices[-1]][2]
+            return source[start:end]
 
         def emit(keep_overlap: bool) -> None:
             nonlocal current, current_vecs
-            joined = joined_text(current)
-            if not joined:
+            joined = span_text(current)
+            if not joined.strip():
                 current = []
                 current_vecs = []
                 return
@@ -118,10 +130,12 @@ class SemanticChunker(DocumentChunker):
             else:
                 groups.append(joined)
             if keep_overlap and overlap > 0 and current:
-                current, current_vecs = _overlap_sentences(
+                current, current_vecs = _overlap_sentence_indices(
                     current,
+                    sentences,
                     current_vecs if vectors is not None else None,
                     overlap,
+                    source,
                 )
             else:
                 current = []
@@ -137,27 +151,33 @@ class SemanticChunker(DocumentChunker):
                 continue
 
             if not current:
-                current = [sentence]
+                current = [index]
                 current_vecs = [vector] if vector is not None else []
                 continue
 
-            candidate_len = len(joined_text([*current, sentence]))
+            candidate_len = len(span_text([*current, index]))
             over_size = candidate_len > chunk_size
             similar = True
-            if not over_size and len(joined_text(current)) >= min_keep:
-                similar = _is_similar(current, current_vecs, sentence, vector, threshold)
+            if not over_size and len(span_text(current)) >= min_keep:
+                similar = _is_similar(
+                    [sentences[i][0] for i in current],
+                    current_vecs,
+                    sentence,
+                    vector,
+                    threshold,
+                )
 
             if over_size or not similar:
                 emit(keep_overlap=True)
-                if current and len(joined_text([*current, sentence])) > chunk_size:
+                if current and len(span_text([*current, index])) > chunk_size:
                     current = []
                     current_vecs = []
-                current.append(sentence)
+                current.append(index)
                 if vector is not None:
                     current_vecs.append(vector)
                 continue
 
-            current.append(sentence)
+            current.append(index)
             if vector is not None:
                 current_vecs.append(vector)
 
@@ -177,21 +197,30 @@ def _is_similar(
     return jaccard(tokenize(" ".join(current)), tokenize(next_sentence)) >= threshold
 
 
-def _overlap_sentences(
-    sentences: list[str],
+def _overlap_sentence_indices(
+    indices: list[int],
+    sentences: list[_Sentence],
     vectors: list[list[float]] | None,
     overlap: int,
-) -> tuple[list[str], list[list[float]]]:
-    window: list[str] = []
+    source: str,
+) -> tuple[list[int], list[list[float]]]:
+    """Keep a trailing window of sentences whose source span length ≤ overlap."""
+
+    window: list[int] = []
     window_vecs: list[list[float]] = []
-    for index in range(len(sentences) - 1, -1, -1):
-        candidate = [sentences[index], *window]
-        length = len(" ".join(candidate))
+    for position in range(len(indices) - 1, -1, -1):
+        candidate = [indices[position], *window]
+        start = sentences[candidate[0]][1]
+        end = sentences[candidate[-1]][2]
+        length = end - start
         if window and length > overlap:
             break
         window = candidate
         if vectors is not None:
-            window_vecs = [vectors[index], *window_vecs]
+            window_vecs = [vectors[position], *window_vecs]
+    # Prefer non-empty source text; empty slice should not retain indices.
+    if window and not source[sentences[window[0]][1] : sentences[window[-1]][2]].strip():
+        return [], []
     return window, window_vecs
 
 
