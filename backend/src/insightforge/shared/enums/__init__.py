@@ -68,12 +68,21 @@ class VectorStoreHint(StrEnum):
     MEMORY = "memory"
 
 
+class RetrievalMode(StrEnum):
+    """How Phase 5.3 retrieval ranks candidate chunks."""
+
+    SEMANTIC = "semantic"
+    BM25 = "bm25"
+    HYBRID = "hybrid"
+
+
 __all__ = [
     "ChunkStrategy",
     "ContentType",
     "EmbeddingInputType",
     "EmbeddingProviderHint",
     "QueryIntent",
+    "RetrievalMode",
     "SearchProviderHint",
     "VectorStoreHint",
 ]

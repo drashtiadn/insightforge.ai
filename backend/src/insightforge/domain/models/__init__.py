@@ -9,6 +9,7 @@ from insightforge.domain.models.document import (
 )
 from insightforge.domain.models.embedding import EmbeddingResult
 from insightforge.domain.models.research_task import ResearchTask
+from insightforge.domain.models.retrieval import RetrievalHit
 from insightforge.domain.models.vector import VectorHit, VectorRecord
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "EmbeddingResult",
     "ParsedDocument",
     "ResearchTask",
+    "RetrievalHit",
     "VectorHit",
     "VectorRecord",
 ]

@@ -104,6 +104,14 @@ class Settings(BaseSettings):
     qdrant_timeout_seconds: float = 30.0
     vector_session_ttl_seconds: float = 3600.0
 
+    # Retrieval (Phase 5.3)
+    retrieval_mode: str = "hybrid"  # semantic | bm25 | hybrid
+    retrieval_default_limit: int = 8
+    retrieval_candidate_multiplier: int = 4
+    retrieval_rrf_k: int = 60
+    retrieval_bm25_k1: float = 1.5
+    retrieval_bm25_b: float = 0.75
+
     @property
     def is_production(self) -> bool:
         return self.app_env == Environment.PRODUCTION
