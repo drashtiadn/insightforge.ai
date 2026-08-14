@@ -61,6 +61,13 @@ class EmbeddingInputType(StrEnum):
     DOCUMENT = "document"
 
 
+class VectorStoreHint(StrEnum):
+    """Vector store backends for Phase 5.2."""
+
+    QDRANT = "qdrant"
+    MEMORY = "memory"
+
+
 __all__ = [
     "ChunkStrategy",
     "ContentType",
@@ -68,4 +75,5 @@ __all__ = [
     "EmbeddingProviderHint",
     "QueryIntent",
     "SearchProviderHint",
+    "VectorStoreHint",
 ]

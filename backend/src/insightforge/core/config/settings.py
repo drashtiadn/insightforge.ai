@@ -95,6 +95,15 @@ class Settings(BaseSettings):
     embedding_timeout_seconds: float = 30.0
     embedding_batch_size: int = 32
 
+    # Vector stores (Phase 5.2)
+    vector_store: str = "memory"  # memory | qdrant
+    vector_dimensions: int = 1024
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: SecretStr | None = None
+    qdrant_collection: str = "insightforge"
+    qdrant_timeout_seconds: float = 30.0
+    vector_session_ttl_seconds: float = 3600.0
+
     @property
     def is_production(self) -> bool:
         return self.app_env == Environment.PRODUCTION
