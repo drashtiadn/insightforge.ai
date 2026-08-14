@@ -23,6 +23,11 @@ dependencies = [
     "pytesseract>=0.3.10",
 ]
 
+[project.optional-dependencies]
+local-embeddings = [
+    "sentence-transformers>=3.0.0",
+]
+
 [dependency-groups]
 dev = [
     "ruff>=0.8.0",
@@ -95,7 +100,7 @@ mypy_path = "src"
 packages = ["insightforge"]
 
 [[tool.mypy.overrides]]
-module = ["pytesseract"]
+module = ["pytesseract", "sentence_transformers"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------

@@ -47,9 +47,25 @@ class ChunkStrategy(StrEnum):
     SEMANTIC = "semantic"
 
 
+class EmbeddingProviderHint(StrEnum):
+    """Embedding backends for Phase 5.1."""
+
+    VOYAGE = "voyage"
+    LOCAL = "local"
+
+
+class EmbeddingInputType(StrEnum):
+    """Voyage-style hint for asymmetric retrieval embeddings."""
+
+    QUERY = "query"
+    DOCUMENT = "document"
+
+
 __all__ = [
     "ChunkStrategy",
     "ContentType",
+    "EmbeddingInputType",
+    "EmbeddingProviderHint",
     "QueryIntent",
     "SearchProviderHint",
 ]

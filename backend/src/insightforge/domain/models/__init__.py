@@ -7,6 +7,7 @@ from insightforge.domain.models.document import (
     DocumentRef,
     ParsedDocument,
 )
+from insightforge.domain.models.embedding import EmbeddingResult
 from insightforge.domain.models.research_task import ResearchTask
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "Document",
     "DocumentChunk",
     "DocumentRef",
+    "EmbeddingResult",
     "ParsedDocument",
     "ResearchTask",
 ]

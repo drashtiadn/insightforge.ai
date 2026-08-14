@@ -86,6 +86,15 @@ class Settings(BaseSettings):
     document_semantic_threshold: float = 0.25
     document_citation_enabled: bool = True
 
+    # Embeddings (Phase 5.1)
+    voyage_api_key: SecretStr | None = None
+    embedding_provider: str = "voyage"  # voyage | local
+    embedding_voyage_model: str = "voyage-3.5"
+    embedding_voyage_dimensions: int | None = None  # optional output_dimension
+    embedding_local_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_timeout_seconds: float = 30.0
+    embedding_batch_size: int = 32
+
     @property
     def is_production(self) -> bool:
         return self.app_env == Environment.PRODUCTION
