@@ -17,6 +17,8 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: 8000
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      VECTOR_STORE: ${VECTOR_STORE:-memory}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
       interval: 30s
@@ -24,3 +26,16 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+
+  qdrant:
+    profiles: ["qdrant"]
+    image: qdrant/qdrant:v1.13.2
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:

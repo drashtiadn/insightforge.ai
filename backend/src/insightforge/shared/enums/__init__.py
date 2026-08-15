@@ -47,9 +47,51 @@ class ChunkStrategy(StrEnum):
     SEMANTIC = "semantic"
 
 
+class EmbeddingProviderHint(StrEnum):
+    """Embedding backends for Phase 5.1."""
+
+    VOYAGE = "voyage"
+    LOCAL = "local"
+
+
+class EmbeddingInputType(StrEnum):
+    """Voyage-style hint for asymmetric retrieval embeddings."""
+
+    QUERY = "query"
+    DOCUMENT = "document"
+
+
+class VectorStoreHint(StrEnum):
+    """Vector store backends for Phase 5.2."""
+
+    QDRANT = "qdrant"
+    MEMORY = "memory"
+
+
+class RetrievalMode(StrEnum):
+    """How Phase 5.3 retrieval ranks candidate chunks."""
+
+    SEMANTIC = "semantic"
+    BM25 = "bm25"
+    HYBRID = "hybrid"
+
+
+class RerankerHint(StrEnum):
+    """Reranker backends for Phase 5.4."""
+
+    CROSS_ENCODER = "cross-encoder"
+    BGE = "bge"
+    JINA = "jina"
+
+
 __all__ = [
     "ChunkStrategy",
     "ContentType",
+    "EmbeddingInputType",
+    "EmbeddingProviderHint",
     "QueryIntent",
+    "RerankerHint",
+    "RetrievalMode",
     "SearchProviderHint",
+    "VectorStoreHint",
 ]

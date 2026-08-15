@@ -12,6 +12,8 @@ repos:
         args: ["--maxkb=1000"]
       - id: check-merge-conflict
       - id: detect-private-key
+      - id: debug-statements
+      - id: check-case-conflict
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.6
@@ -30,4 +32,12 @@ repos:
         language: system
         args: [run, --directory, backend, mypy, src]
         files: ^backend/src/
+        pass_filenames: false
+
+      - id: pytest
+        name: pytest (unit)
+        entry: uv
+        language: system
+        args: [run, --directory, backend, pytest, tests/unit, -q]
+        files: ^backend/
         pass_filenames: false

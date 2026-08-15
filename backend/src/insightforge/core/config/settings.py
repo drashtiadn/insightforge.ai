@@ -86,6 +86,41 @@ class Settings(BaseSettings):
     document_semantic_threshold: float = 0.25
     document_citation_enabled: bool = True
 
+    # Embeddings (Phase 5.1)
+    voyage_api_key: SecretStr | None = None
+    embedding_provider: str = "voyage"  # voyage | local
+    embedding_voyage_model: str = "voyage-3.5"
+    embedding_voyage_dimensions: int | None = None  # optional output_dimension
+    embedding_local_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_timeout_seconds: float = 30.0
+    embedding_batch_size: int = 32
+
+    # Vector stores (Phase 5.2)
+    vector_store: str = "memory"  # memory | qdrant
+    vector_dimensions: int = 1024
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: SecretStr | None = None
+    qdrant_collection: str = "insightforge"
+    qdrant_timeout_seconds: float = 30.0
+    vector_session_ttl_seconds: float = 3600.0
+
+    # Retrieval (Phase 5.3)
+    retrieval_mode: str = "hybrid"  # semantic | bm25 | hybrid
+    retrieval_default_limit: int = 8
+    retrieval_candidate_multiplier: int = 4
+    retrieval_rrf_k: int = 60
+    retrieval_bm25_k1: float = 1.5
+    retrieval_bm25_b: float = 0.75
+
+    # Reranking (Phase 5.4)
+    jina_api_key: SecretStr | None = None
+    reranker_provider: str = "cross-encoder"  # cross-encoder | bge | jina
+    reranker_cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_bge_model: str = "BAAI/bge-reranker-base"
+    reranker_jina_model: str = "jina-reranker-v2-base-multilingual"
+    reranker_timeout_seconds: float = 30.0
+    reranker_top_n: int | None = None
+
     @property
     def is_production(self) -> bool:
         return self.app_env == Environment.PRODUCTION
