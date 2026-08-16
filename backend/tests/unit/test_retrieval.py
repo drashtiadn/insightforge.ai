@@ -235,3 +235,59 @@ def test_session_retrieval_is_isolated() -> None:
 
     assert [hit.id for hit in primary.retrieve("RAG", mode="bm25")] == ["global"]
     assert [hit.id for hit in session.retrieve("RAG", mode="bm25")] == ["local"]
+
+
+def test_session_bm25_persists_across_session_lookups() -> None:
+    """Re-opening the same session_id must keep BM25 aligned with the store."""
+
+    embeddings = EmbeddingService(
+        LocalEmbeddingProvider(embed_fn=_keyword_embed, model="test-embed")
+    )
+    store = MemoryVectorStore(dimensions=2)
+    sessions = VectorStoreService(store)
+    primary = RetrievalService(
+        store,
+        embeddings=embeddings,
+        sessions=sessions,
+        default_mode=RetrievalMode.HYBRID,
+    )
+
+    first = primary.session("research-1")
+    first.index([_record("local", "Session-only RAG notes about quantum", [1.0, 0.0])])
+
+    second = primary.session("research-1")
+    assert first.store is second.store
+    assert [hit.id for hit in second.retrieve("quantum", mode="bm25")] == ["local"]
+
+    hybrid = second.retrieve("quantum RAG", mode=RetrievalMode.HYBRID, limit=1)
+    assert hybrid[0].id == "local"
+    assert hybrid[0].bm25_rank == 1
+    assert hybrid[0].semantic_rank == 1
+
+    second.delete(ids=["local"])
+    third = primary.session("research-1")
+    assert third.retrieve("quantum", mode="bm25") == []
+    assert third.retrieve("quantum", mode="semantic") == []
+
+
+def test_session_bm25_resets_when_registry_store_is_replaced() -> None:
+    embeddings = EmbeddingService(
+        LocalEmbeddingProvider(embed_fn=_keyword_embed, model="test-embed")
+    )
+    store = MemoryVectorStore(dimensions=2)
+    sessions = VectorStoreService(store)
+    primary = RetrievalService(
+        store,
+        embeddings=embeddings,
+        sessions=sessions,
+        default_mode=RetrievalMode.BM25,
+    )
+
+    session = primary.session("research-1")
+    session.index([_record("local", "Session-only RAG notes", [1.0, 0.0])])
+    assert sessions.drop_session("research-1") is True
+
+    reopened = primary.session("research-1")
+    assert reopened.store is not session.store
+    assert reopened.retrieve("RAG", mode="bm25") == []
+    assert reopened.store.count() == 0

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from insightforge.core.config import Settings, get_settings
@@ -21,9 +22,18 @@ from insightforge.infrastructure.vectorstores.service import (
     VectorStoreService,
     create_vector_store_service,
 )
+from insightforge.infrastructure.vectorstores.stores.memory import MemoryVectorStore
 from insightforge.shared.enums import RetrievalMode
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _SessionRetrievalState:
+    """Pair a session vector store with its BM25 sidecar."""
+
+    store: MemoryVectorStore
+    bm25: BM25Index
 
 
 def parse_retrieval_mode(value: str) -> RetrievalMode:
@@ -89,12 +99,17 @@ class RetrievalService:
     ) -> None:
         self._store = store
         self._embeddings = embeddings
-        self._bm25 = bm25 or BM25Index()
+        # Use ``is None`` — BM25Index defines ``__len__``, so an empty index is
+        # falsy and ``bm25 or BM25Index()`` would discard a shared sidecar.
+        self._bm25 = BM25Index() if bm25 is None else bm25
         self._default_mode = default_mode
         self._default_limit = max(1, default_limit)
         self._candidate_multiplier = max(1, candidate_multiplier)
         self._rrf_k = max(1, rrf_k)
         self._sessions = sessions
+        # BM25 is process-local; keep one sidecar per live session store so
+        # repeated ``session(id)`` calls stay aligned with the vector index.
+        self._session_state: dict[str, _SessionRetrievalState] = {}
 
     @property
     def store(self) -> VectorStore:
@@ -259,23 +274,35 @@ class RetrievalService:
         return hits
 
     def session(self, session_id: str) -> RetrievalService:
-        """Isolated retrieval over a TTL session vector store."""
+        """Isolated retrieval over a TTL session vector store.
+
+        Repeated calls with the same ``session_id`` reuse the registry's
+        ``MemoryVectorStore`` and the matching BM25 corpus. A fresh BM25 is
+        only created when the registry returns a new store (TTL expiry / drop).
+        """
 
         if self._sessions is None:
             raise ValidationFailedError(
                 "session retrieval requires a VectorStoreService",
                 details={"field": "session_id"},
             )
+        cleaned = session_id.strip()
         store = self._sessions.session(session_id)
+        cached = self._session_state.get(cleaned)
+        if cached is None or cached.store is not store:
+            bm25 = BM25Index(k1=self._bm25.k1, b=self._bm25.b)
+            self._session_state[cleaned] = _SessionRetrievalState(store=store, bm25=bm25)
+        else:
+            bm25 = cached.bm25
         logger.info(
             "retrieval session store session_id=%s",
-            session_id,
-            extra={"session_id": session_id},
+            cleaned,
+            extra={"session_id": cleaned},
         )
         return RetrievalService(
             store,
             embeddings=self._embeddings,
-            bm25=BM25Index(k1=self._bm25.k1, b=self._bm25.b),
+            bm25=bm25,
             default_mode=self._default_mode,
             default_limit=self._default_limit,
             candidate_multiplier=self._candidate_multiplier,
