@@ -84,12 +84,15 @@ def build_chunks(
     """Turn ``(text, heading)`` pieces into indexed ``DocumentChunk`` rows."""
 
     located: list[tuple[str, int, int, str | None]] = []
+    # Advance past each match start so repeated piece text binds to later
+    # occurrences, while overlap windows (which begin inside the prior span)
+    # still resolve correctly when searching from ``start + 1``.
     cursor = 0
     for piece, heading in pieces:
         text = piece.strip()
         if not text:
             continue
-        start, end = locate_span(document.text, text, start_at=max(0, cursor - 1))
+        start, end = locate_span(document.text, text, start_at=cursor)
         located.append((text, start, end, heading))
         cursor = start + 1
 

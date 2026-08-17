@@ -66,6 +66,24 @@ def test_recursive_chunker_empty_returns_no_chunks() -> None:
     assert RecursiveCharacterChunker().chunk(_doc("   ")) == []
 
 
+def test_recursive_chunker_duplicate_paragraphs_get_distinct_spans() -> None:
+    """Repeated piece text must not reuse the first occurrence's offsets."""
+
+    repeated = "Same paragraph content here."
+    text = f"{repeated}\n\n{repeated}\n\nDifferent ending material that is unique."
+    chunks = RecursiveCharacterChunker(ChunkConfig(chunk_size=40, chunk_overlap=0)).chunk(
+        _doc(text)
+    )
+
+    duplicates = [chunk for chunk in chunks if chunk.text == repeated]
+    assert len(duplicates) == 2
+    assert duplicates[0].start == 0
+    assert duplicates[1].start == text.index(repeated, duplicates[0].end)
+    assert duplicates[0].start != duplicates[1].start
+    for chunk in duplicates:
+        assert text[chunk.start : chunk.end] == chunk.text
+
+
 def test_markdown_chunker_keeps_heading_sections() -> None:
     text = """# Intro
 
