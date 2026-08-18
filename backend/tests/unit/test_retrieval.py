@@ -216,6 +216,30 @@ def test_delete_keeps_bm25_in_sync() -> None:
     assert [hit.id for hit in hits] == ["keep"]
 
 
+def test_delete_ids_and_filters_keeps_bm25_aligned_with_store() -> None:
+    """Vector store deletes id∩filter; BM25 must not drop ids outside the filter."""
+
+    service = _service()
+    service.index(
+        [
+            _record("a", "Apple fruit sweet RAG", [1.0, 0.0], doc="1"),
+            _record("b", "Banana fruit yellow RAG", [0.0, 1.0], doc="2"),
+            _record("c", "Carrot vegetable orange RAG", [1.0, 1.0], doc="1"),
+        ]
+    )
+
+    removed = service.delete(ids=["a", "b", "c"], filters={"doc": "1"})
+    assert removed == 2
+    assert service.store.count() == 1
+
+    bm25_hits = service.retrieve("Banana", mode="bm25", limit=5)
+    assert [hit.id for hit in bm25_hits] == ["b"]
+
+    # Hybrid must still surface the surviving vector via lexical (and dense).
+    hybrid_ids = {hit.id for hit in service.retrieve("Banana fruit", mode="hybrid", limit=5)}
+    assert "b" in hybrid_ids
+
+
 def test_session_retrieval_is_isolated() -> None:
     embeddings = EmbeddingService(
         LocalEmbeddingProvider(embed_fn=_keyword_embed, model="test-embed")

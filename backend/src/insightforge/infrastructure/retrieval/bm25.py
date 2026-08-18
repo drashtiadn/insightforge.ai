@@ -91,10 +91,25 @@ class BM25Index:
                 removed += 1
         return removed
 
-    def delete_matching(self, filters: Mapping[str, Any]) -> int:
-        """Remove documents whose metadata matches ``filters``."""
+    def delete_matching(
+        self,
+        filters: Mapping[str, Any],
+        *,
+        ids: Sequence[str] | None = None,
+    ) -> int:
+        """Remove documents whose metadata matches ``filters``.
 
-        to_drop = [doc.id for doc in self._docs.values() if matches_filters(doc.metadata, filters)]
+        When ``ids`` is provided, only those ids are considered (AND with
+        ``filters``), matching vector-store delete semantics.
+        """
+
+        id_set = {record_id.strip() for record_id in ids if record_id.strip()} if ids is not None else None
+        to_drop = [
+            doc.id
+            for doc in self._docs.values()
+            if matches_filters(doc.metadata, filters)
+            and (id_set is None or doc.id in id_set)
+        ]
         return self.delete(to_drop)
 
     def clear(self) -> None:

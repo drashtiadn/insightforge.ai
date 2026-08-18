@@ -177,10 +177,18 @@ class RetrievalService:
         ids: Sequence[str] | None = None,
         filters: Mapping[str, Any] | None = None,
     ) -> int:
-        """Delete from both the vector store and BM25."""
+        """Delete from both the vector store and BM25.
+
+        When both ``ids`` and ``filters`` are set, BM25 follows the same
+        intersection semantics as the vector store (id AND filter). Deleting
+        every listed id from BM25 while the store only drops the filtered
+        subset would leave hybrid/BM25 search missing still-indexed vectors.
+        """
 
         removed = self._store.delete(ids=ids, filters=filters)
-        if ids is not None:
+        if ids is not None and filters is not None:
+            self._bm25.delete_matching(filters, ids=ids)
+        elif ids is not None:
             self._bm25.delete(ids)
         elif filters is not None:
             self._bm25.delete_matching(filters)
