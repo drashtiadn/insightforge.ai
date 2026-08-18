@@ -8,8 +8,12 @@ from insightforge.agents.planner import (
     ResearchTask,
     SimplePlanner,
 )
+from insightforge.agents.reasoner import Reasoner, SimpleReasoner
+from insightforge.agents.reflection import ReflectionAgent, SimpleReflectionAgent
+from insightforge.agents.report import ReportGenerator, SimpleReportGenerator
 from insightforge.agents.reranker import SimpleReranker
 from insightforge.agents.retriever import SimpleRetriever
+from insightforge.agents.search import SimpleSearchAgent
 from insightforge.agents.tools import FunctionTool, Tool
 
 __all__ = [
@@ -17,10 +21,17 @@ __all__ = [
     "FunctionTool",
     "Planner",
     "QueryAnalysis",
+    "Reasoner",
+    "ReflectionAgent",
+    "ReportGenerator",
     "ResearchPlan",
     "ResearchTask",
     "SimplePlanner",
+    "SimpleReasoner",
+    "SimpleReflectionAgent",
+    "SimpleReportGenerator",
     "SimpleReranker",
     "SimpleRetriever",
+    "SimpleSearchAgent",
     "Tool",
 ]
