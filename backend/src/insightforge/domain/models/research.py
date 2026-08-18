@@ -15,11 +15,52 @@ from pydantic import BaseModel, ConfigDict, Field
 from insightforge.domain.models.document import Citation
 
 __all__ = [
+    "Conflict",
+    "Evidence",
+    "EvidenceCluster",
     "ReasoningResult",
     "ReflectionResult",
     "ReportSection",
     "ResearchReport",
 ]
+
+
+class Evidence(BaseModel):
+    """A single supporting snippet lifted from search or retrieval output.
+
+    Kept small on purpose: aggregation, conflict detection, and citation
+    generation all consume this without needing the full raw document.
+    """
+
+    source_id: str
+    snippet: str
+    score: float = 0.0
+    url: str | None = None
+    title: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceCluster(BaseModel):
+    """Group of ``Evidence`` items that support the same claim.
+
+    ``claim`` is the representative snippet (usually the highest-scoring
+    member). Downstream agents use clusters as citation anchors so the
+    report can attach references to specific findings, not to the whole run.
+    """
+
+    claim: str
+    evidence: list[Evidence] = Field(default_factory=list)
+    score: float = 0.0
+
+
+class Conflict(BaseModel):
+    """A detected disagreement between two evidence clusters."""
+
+    claim_a: str
+    claim_b: str
+    sources_a: list[str] = Field(default_factory=list)
+    sources_b: list[str] = Field(default_factory=list)
+    reason: str = ""
 
 
 class ReasoningResult(BaseModel):
@@ -34,6 +75,8 @@ class ReasoningResult(BaseModel):
     answer: str = ""
     key_points: list[str] = Field(default_factory=list)
     used_source_ids: list[str] = Field(default_factory=list)
+    clusters: list[EvidenceCluster] = Field(default_factory=list)
+    conflicts: list[Conflict] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -49,6 +92,7 @@ class ReflectionResult(BaseModel):
     is_sufficient: bool
     gaps: list[str] = Field(default_factory=list)
     follow_up_queries: list[str] = Field(default_factory=list)
+    conflicts: list[Conflict] = Field(default_factory=list)
     reasoning: str = ""
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 

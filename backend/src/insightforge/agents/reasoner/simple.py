@@ -1,9 +1,17 @@
 """Deterministic reasoner used for offline runs and CI.
 
-No LLM calls. Synthesizes a short answer by concatenating the strongest
-snippets from retrieval hits and documents. Phase 6.2 replaces the naive
-synthesis with evidence aggregation, conflict detection, and confidence
-scoring — the contract stays the same.
+Pipeline:
+
+1. Compress raw hits/documents into a small, deduplicated evidence set.
+2. Aggregate them into ``EvidenceCluster`` groups per claim.
+3. Detect conflicts between clusters.
+4. Score confidence from cluster strength and conflict count.
+5. Synthesize a short answer from the strongest cluster claims.
+
+The clustering and answer synthesis stay heuristic (no LLM), but the shape
+of ``ReasoningResult`` — clusters, conflicts, source ids, confidence — is
+what an LLM-backed reasoner will populate too, so downstream reflection
+and report agents will not need changes.
 """
 
 from __future__ import annotations
@@ -13,25 +21,39 @@ from collections.abc import Sequence
 from insightforge.agents.reasoner.base import Reasoner
 from insightforge.core.exceptions import ValidationFailedError
 from insightforge.core.logging import get_logger
-from insightforge.domain.models import Document, ReasoningResult, RetrievalHit
+from insightforge.domain.models import (
+    Conflict,
+    Document,
+    EvidenceCluster,
+    ReasoningResult,
+    RetrievalHit,
+)
+from insightforge.research import (
+    aggregate_evidence,
+    compress_documents,
+    compress_hits,
+    detect_conflicts,
+    reasoning_confidence,
+)
 
 logger = get_logger(__name__)
 
-# Cap synthesized answer size so downstream prompts stay predictable.
 _MAX_ANSWER_CHARS = 1200
-_MAX_KEY_POINTS = 6
-_MAX_SNIPPET_CHARS = 240
-
-
-def _snippet(text: str, *, limit: int = _MAX_SNIPPET_CHARS) -> str:
-    cleaned = " ".join(text.split())
-    if len(cleaned) <= limit:
-        return cleaned
-    return cleaned[: limit - 1].rstrip() + "…"
+_MAX_CLAIMS_IN_ANSWER = 4
 
 
 class SimpleReasoner(Reasoner):
-    """Heuristic reasoner that stitches ranked evidence into a short answer."""
+    """Heuristic reasoner: compress → aggregate → conflict-check → synthesize."""
+
+    def __init__(
+        self,
+        *,
+        max_hits: int = 8,
+        max_documents: int = 8,
+    ) -> None:
+        super().__init__()
+        self._max_hits = max_hits
+        self._max_documents = max_documents
 
     def reason(
         self,
@@ -48,62 +70,45 @@ class SimpleReasoner(Reasoner):
                 details={"field": "query"},
             )
 
-        hit_list = list(hits or [])
-        doc_list = list(documents or [])
-        logger.info(
-            "reasoner run query_len=%d hits=%d documents=%d",
-            len(cleaned_query),
-            len(hit_list),
-            len(doc_list),
+        compressed_hits = compress_hits(list(hits or []), max_items=self._max_hits)
+        compressed_docs = compress_documents(
+            list(documents or []),
+            max_items=self._max_documents,
         )
 
-        key_points: list[str] = []
-        used_ids: list[str] = []
+        logger.info(
+            "reasoner run query_len=%d hits=%d->%d documents=%d->%d",
+            len(cleaned_query),
+            len(hits or []),
+            len(compressed_hits),
+            len(documents or []),
+            len(compressed_docs),
+        )
 
-        for hit in hit_list[:_MAX_KEY_POINTS]:
-            snippet = _snippet(hit.text)
-            if not snippet:
-                continue
-            key_points.append(snippet)
-            used_ids.append(hit.id)
+        clusters = aggregate_evidence(
+            hits=compressed_hits,
+            documents=compressed_docs,
+        )
+        conflicts = detect_conflicts(clusters)
+        source_ids = self._collect_source_ids(clusters)
+        confidence = reasoning_confidence(
+            clusters,
+            conflicts,
+            source_count=len(source_ids),
+        )
 
-        for doc in doc_list:
-            if len(key_points) >= _MAX_KEY_POINTS:
-                break
-            body = doc.snippet or doc.content
-            snippet = _snippet(body)
-            if not snippet:
-                continue
-            key_points.append(snippet)
-            used_ids.append(doc.url)
-
-        if not key_points:
-            logger.info("reasoner produced empty answer no_evidence=1")
-            return ReasoningResult(
-                query=cleaned_query,
-                answer="",
-                key_points=[],
-                used_source_ids=[],
-                confidence=0.0,
-            )
-
-        answer = " ".join(key_points)
-        if len(answer) > _MAX_ANSWER_CHARS:
-            answer = answer[: _MAX_ANSWER_CHARS - 1].rstrip() + "…"
-
-        # Heuristic confidence: more sources → higher, capped at 0.9 for the
-        # deterministic path. The LLM-backed reasoner will replace this.
-        source_count = len(used_ids)
-        confidence = min(0.9, 0.2 + 0.1 * source_count)
+        answer, key_points = self._synthesize(clusters, conflicts)
 
         logger.info(
-            "reasoner produced answer key_points=%d sources=%d confidence=%.2f",
-            len(key_points),
-            source_count,
+            "reasoner produced clusters=%d conflicts=%d sources=%d confidence=%.2f",
+            len(clusters),
+            len(conflicts),
+            len(source_ids),
             confidence,
             extra={
-                "key_points": len(key_points),
-                "sources": source_count,
+                "clusters": len(clusters),
+                "conflicts": len(conflicts),
+                "sources": len(source_ids),
                 "confidence": confidence,
             },
         )
@@ -112,6 +117,43 @@ class SimpleReasoner(Reasoner):
             query=cleaned_query,
             answer=answer,
             key_points=key_points,
-            used_source_ids=used_ids,
+            used_source_ids=source_ids,
+            clusters=clusters,
+            conflicts=conflicts,
             confidence=confidence,
         )
+
+    @staticmethod
+    def _collect_source_ids(clusters: Sequence[EvidenceCluster]) -> list[str]:
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for cluster in clusters:
+            for evidence in cluster.evidence:
+                source_id = evidence.source_id
+                if not source_id or source_id in seen:
+                    continue
+                seen.add(source_id)
+                ordered.append(source_id)
+        return ordered
+
+    @staticmethod
+    def _synthesize(
+        clusters: Sequence[EvidenceCluster],
+        conflicts: Sequence[Conflict],
+    ) -> tuple[str, list[str]]:
+        if not clusters:
+            return "", []
+
+        top_claims = [cluster.claim.strip() for cluster in clusters[:_MAX_CLAIMS_IN_ANSWER]]
+        top_claims = [claim for claim in top_claims if claim]
+        if not top_claims:
+            return "", []
+
+        answer = " ".join(top_claims)
+        if conflicts:
+            answer += f" Note: {len(conflicts)} potential contradiction(s) detected across sources."
+        if len(answer) > _MAX_ANSWER_CHARS:
+            answer = answer[: _MAX_ANSWER_CHARS - 1].rstrip() + "…"
+
+        key_points = [cluster.claim for cluster in clusters if cluster.claim]
+        return answer, key_points
