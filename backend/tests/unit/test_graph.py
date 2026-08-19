@@ -188,12 +188,32 @@ def test_full_graph_stops_at_max_steps() -> None:
     graph = compile_graph(stub_search=True)
     result = graph.invoke(initial_state("budget test", max_steps=1))
 
-    assert result["step"] == 1
-    assert len(result["notes"]) == 1
-    assert len(result["sources"]) == 1
+    # Planned searches stop at max_steps; one reflection follow-up may add a step.
+    assert result["step"] in {1, 2}
+    assert result["step"] == 1 + result["follow_up_used"]
+    assert len(result["notes"]) == result["step"]
+    assert len(result["sources"]) == result["step"]
     assert result["phase"] == "done"
     assert result["report"]
     assert "budget test" in result["report"].lower()
+
+
+def test_full_graph_does_not_duplicate_evidence_from_hits_and_documents() -> None:
+    graph = compile_graph(stub_search=True)
+    result = graph.invoke(initial_state("budget test", max_steps=1))
+
+    used = result["reasoning"]["used_source_ids"]
+    assert len(used) == len(set(used))
+    assert all(item.startswith("http") for item in used)
+
+    evidence = result["report"].split("## Evidence", 1)[-1].split("## ", 1)[0]
+    bullet_lines = [line for line in evidence.splitlines() if line.startswith("- ")]
+    assert len(bullet_lines) == len(set(bullet_lines))
+
+    # Single-page first pass must schedule a follow-up, not invent a second source.
+    assert result["follow_up_used"] == 1
+    assert result["step"] == 2
+    assert any(task.get("id", "").startswith("follow-") for task in result["tasks"])
 
 
 def test_initial_state_defaults_to_auto_max_steps() -> None:

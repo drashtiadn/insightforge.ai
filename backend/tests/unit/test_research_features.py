@@ -111,6 +111,31 @@ def test_aggregate_evidence_handles_empty_inputs() -> None:
     assert aggregate_evidence() == []
 
 
+def test_aggregate_evidence_dedupes_hit_and_document_same_url() -> None:
+    """Pipeline used to pass retrieval hits and their source documents together."""
+
+    text = "Hybrid RAG mixes lexical and dense retrieval signals."
+    hits = [_hit("c0", text, score=0.95)]
+    docs = [_doc("RAG", "https://example.com/c0", text, score=0.5)]
+    clusters = aggregate_evidence(hits=hits, documents=docs)
+
+    assert len(clusters) == 1
+    assert len(clusters[0].evidence) == 1
+    assert clusters[0].evidence[0].source_id == "https://example.com/c0"
+
+
+def test_simple_reasoner_does_not_double_count_hit_and_document() -> None:
+    text = "An overview of budget test covering definitions and practice."
+    hit = _hit("c0", text, score=0.9)
+    doc = _doc("Source 1", "https://example.com/c0", text)
+    result = SimpleReasoner().reason("budget test", hits=[hit], documents=[doc])
+
+    assert result.used_source_ids == ["https://example.com/c0"]
+    reflection = SimpleReflectionAgent().reflect(reasoning=result, hits=[hit], documents=[doc])
+    assert any("only 1 source" in gap for gap in reflection.gaps)
+    assert reflection.follow_up_queries
+
+
 # ---------------------------------------------------------------------------
 # Conflict detection
 # ---------------------------------------------------------------------------

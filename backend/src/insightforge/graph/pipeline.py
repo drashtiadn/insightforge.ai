@@ -65,6 +65,21 @@ def _documents_from_state(state: GraphState) -> list[Document]:
     return synthesized
 
 
+def _evidence_from_state(state: GraphState) -> tuple[list[RetrievalHit], list[Document]]:
+    """Build reasoner inputs without double-counting the same pages.
+
+    After ingest/retrieve, ``hits`` are chunks of ``documents``. Feeding both
+    into aggregation counted one web page as two sources, skipped follow-ups,
+    and duplicated evidence rows in the report.
+    """
+
+    hits = [RetrievalHit.model_validate(raw) for raw in state["hits"]]
+    documents = _documents_from_state(state)
+    if hits:
+        return hits, []
+    return [], documents
+
+
 def _plan_from_state(state: GraphState) -> ResearchPlan:
     try:
         intent = QueryIntent(state["intent"]) if state["intent"] else QueryIntent.EXPLORATORY
@@ -203,8 +218,7 @@ def reason_node(
     """Synthesize an answer from retrieval hits and search documents."""
 
     agent = reasoner or SimpleReasoner()
-    hits = [RetrievalHit.model_validate(raw) for raw in state["hits"]]
-    documents = _documents_from_state(state)
+    hits, documents = _evidence_from_state(state)
     try:
         result = agent.reason(state["query"], hits=hits, documents=documents)
     except Exception as exc:
@@ -236,8 +250,7 @@ def reflect_node(
     except ValidationError:
         reasoning = ReasoningResult(query=state["query"], answer="")
 
-    hits = [RetrievalHit.model_validate(raw) for raw in state["hits"]]
-    documents = _documents_from_state(state)
+    hits, documents = _evidence_from_state(state)
     verdict = agent.reflect(reasoning, hits=hits, documents=documents)
 
     updates: dict[str, Any] = {
@@ -259,9 +272,12 @@ def reflect_node(
             providers=[SearchProviderHint.WEB, SearchProviderHint.WIKIPEDIA],
             priority=9,
         )
-        tasks = [*state["tasks"], task.model_dump(mode="json")]
+        # Run the follow-up next. Drop unrun planned tasks that were already
+        # outside the budget so extending max_steps by one cannot unlock them.
+        completed = state["tasks"][: state["step"]]
+        tasks = [*completed, task.model_dump(mode="json")]
         updates["tasks"] = tasks
-        updates["max_steps"] = max(state["max_steps"], len(tasks))
+        updates["max_steps"] = state["step"] + 1
         updates["follow_up_used"] = state["follow_up_used"] + 1
         logger.info("reflection scheduled follow-up query=%r", follow_query)
 
@@ -288,8 +304,7 @@ def report_node(
         except ValidationError:
             reflection = None
 
-    hits = [RetrievalHit.model_validate(raw) for raw in state["hits"]]
-    documents = _documents_from_state(state)
+    hits, documents = _evidence_from_state(state)
     report = agent.generate(
         plan=plan,
         reasoning=reasoning,

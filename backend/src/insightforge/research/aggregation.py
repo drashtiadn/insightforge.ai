@@ -52,15 +52,31 @@ class _WorkingCluster:
     members: list[Evidence] = field(default_factory=list)
 
 
+def _evidence_key(evidence: Evidence) -> str:
+    """Stable identity so the same source is not clustered twice."""
+
+    if evidence.url:
+        return f"url::{evidence.url.strip().lower()}"
+    if evidence.title:
+        return f"title::{evidence.title.strip().lower()}"
+    snippet = normalize(evidence.snippet).lower()
+    if snippet:
+        return f"text::{snippet}"
+    return f"source::{evidence.source_id.strip().lower()}"
+
+
 def _evidence_from_hit(hit: RetrievalHit) -> Evidence:
     metadata = dict(hit.metadata)
     url = metadata.get("url")
     title = metadata.get("title")
+    url_text = str(url).strip() if url else ""
+    # Prefer URL so hit/document pairs for the same page share one source id.
+    source_id = url_text or hit.id
     return Evidence(
-        source_id=hit.id,
+        source_id=source_id,
         snippet=clean_snippet(hit.text),
         score=float(hit.score),
-        url=str(url) if url else None,
+        url=url_text or None,
         title=str(title) if title else None,
         metadata=metadata,
     )
@@ -114,8 +130,21 @@ def aggregate_evidence(
     """
 
     pool: list[Evidence] = []
-    pool.extend(_evidence_from_hit(hit) for hit in (hits or []))
-    pool.extend(_evidence_from_document(doc) for doc in (documents or []))
+    seen: set[str] = set()
+    for hit in hits or []:
+        evidence = _evidence_from_hit(hit)
+        key = _evidence_key(evidence)
+        if key in seen:
+            continue
+        seen.add(key)
+        pool.append(evidence)
+    for doc in documents or []:
+        evidence = _evidence_from_document(doc)
+        key = _evidence_key(evidence)
+        if key in seen:
+            continue
+        seen.add(key)
+        pool.append(evidence)
 
     working: list[_WorkingCluster] = []
     for evidence in pool:

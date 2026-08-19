@@ -162,7 +162,10 @@ def test_simple_reasoner_synthesizes_answer_from_hits() -> None:
     assert result.query == "vector databases"
     assert "Vector databases" in result.answer
     assert len(result.key_points) == 2
-    assert result.used_source_ids == ["h1", "h2"]
+    assert result.used_source_ids == [
+        "https://example.com/h1",
+        "https://example.com/h2",
+    ]
     assert 0.0 < result.confidence <= 0.9
 
 
