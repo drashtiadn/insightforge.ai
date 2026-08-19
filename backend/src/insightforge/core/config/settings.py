@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     secret_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
+    gemini_api_key: SecretStr | None = None
+
+    # LLM (Gemini) — planner / reasoner / report. Heuristics run when unavailable.
+    llm_provider: str = "gemini"  # gemini | none
+    llm_gemini_model: str = "gemini-2.5-flash"
+    llm_timeout_seconds: float = 60.0
+    llm_max_tokens: int = 2048
+    llm_temperature: float = 0.2
 
     # LangSmith observability (https://smith.langchain.com)
     langsmith_tracing: bool = False

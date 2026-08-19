@@ -2,30 +2,48 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
+from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langsmith import traceable
 
+from insightforge.agents import (
+    Planner,
+    Reasoner,
+    ReflectionAgent,
+    ReportGenerator,
+    create_planner,
+    create_reasoner,
+    create_reflection_agent,
+    create_report_generator,
+)
+from insightforge.core.config import get_settings
 from insightforge.core.logging import get_logger
-from insightforge.graph.edges import after_evaluate, after_plan
-from insightforge.graph.nodes import (
-    evaluate_node,
-    plan_node,
+from insightforge.graph.edges import after_plan, after_reflect, after_search
+from insightforge.graph.nodes import plan_node, research_node, search_node
+from insightforge.graph.pipeline import (
+    ingest_node,
+    reason_node,
+    reflect_node,
     report_node,
-    research_node,
-    search_node,
+    retrieve_node,
 )
 from insightforge.graph.state import GraphState, initial_state
+from insightforge.infrastructure.document.chunking import ChunkConfig
+from insightforge.infrastructure.document.service import chunk_config_from_settings
+from insightforge.infrastructure.llm import LlmService, create_llm_service
+from insightforge.infrastructure.rerankers import RerankerService, create_reranker_service
+from insightforge.infrastructure.retrieval import RetrievalService, create_retrieval_service
 from insightforge.infrastructure.search import SearchService, create_search_service
 from insightforge.infrastructure.tracing import (
     configure_tracing,
     debug_run_summary,
     tracing_status,
 )
+from insightforge.infrastructure.vectorstores.stores import MemoryVectorStore
 
 logger = get_logger(__name__)
 
@@ -37,6 +55,7 @@ class WorkflowResult:
     query: str
     report: str
     score: float
+    confidence: float
     phase: str
     errors: tuple[str, ...]
     transitions: tuple[str, ...]
@@ -49,15 +68,33 @@ class WorkflowResult:
         return self.phase == "done" and not self.errors
 
 
-def _bound_search_node(
-    search_service: SearchService | None,
-) -> Callable[[GraphState], dict[str, Any]]:
-    """Bind ``search_service`` into ``search_node`` for LangGraph registration."""
+@dataclass
+class PipelineResources:
+    """Services bound into a compiled graph for one run or a long-lived graph."""
 
-    def _search(state: GraphState) -> dict[str, Any]:
-        return search_node(state, search_service=search_service)
+    search: SearchService | None
+    owns_search: bool
+    retrieval_root: RetrievalService
+    session: RetrievalService
+    reranker: RerankerService | None
+    llm: LlmService
+    planner: Planner
+    reasoner: Reasoner
+    reporter: ReportGenerator
+    reflection: ReflectionAgent
+    chunk_config: ChunkConfig
 
-    return _search
+    def close(self) -> None:
+        """Close owned HTTP clients. Idempotent."""
+
+        if self.owns_search and self.search is not None:
+            self.search.close()
+        self.llm.close()
+        if self.reranker is not None:
+            self.reranker.close()
+        embeddings = self.retrieval_root.embeddings
+        if embeddings is not None:
+            embeddings.close()
 
 
 def resolve_search_service(
@@ -79,37 +116,129 @@ def resolve_search_service(
     return create_search_service(), True
 
 
+def assemble_resources(
+    *,
+    search_service: SearchService | None = None,
+    stub_search: bool = False,
+    retrieval: RetrievalService | None = None,
+    reranker: RerankerService | None = None,
+    llm: LlmService | None = None,
+    planner: Planner | None = None,
+    reasoner: Reasoner | None = None,
+    reporter: ReportGenerator | None = None,
+    reflection: ReflectionAgent | None = None,
+) -> PipelineResources:
+    """Build default pipeline services for compile/run."""
+
+    search, owns_search = resolve_search_service(search_service, stub_search=stub_search)
+    llm_service = llm if llm is not None else create_llm_service()
+    if retrieval is not None:
+        retrieval_root = retrieval
+        session = retrieval_root
+    elif stub_search:
+        retrieval_root = RetrievalService(MemoryVectorStore())
+        session = retrieval_root
+    else:
+        retrieval_root = create_retrieval_service()
+        session = retrieval_root.session(uuid4().hex)
+    rerank_service = reranker
+    if rerank_service is None and not stub_search:
+        rerank_service = create_reranker_service()
+    return PipelineResources(
+        search=search,
+        owns_search=owns_search,
+        retrieval_root=retrieval_root,
+        session=session,
+        reranker=rerank_service,
+        llm=llm_service,
+        planner=planner or create_planner(llm_service),
+        reasoner=reasoner or create_reasoner(llm_service),
+        reporter=reporter or create_report_generator(llm_service),
+        reflection=reflection or create_reflection_agent(),
+        chunk_config=chunk_config_from_settings(get_settings()),
+    )
+
+
 def build_graph(
     *,
     search_service: SearchService | None = None,
+    resources: PipelineResources | None = None,
 ) -> StateGraph[GraphState, None, GraphState, GraphState]:
     """Wire nodes and edges into a StateGraph.
 
-    ``search_service`` is bound into the ``search`` node. Pass ``None`` for the
-    offline stub fetcher. Prefer ``compile_graph`` / ``run_research``, which
-    inject a real ``SearchService`` by default.
+    ``resources`` binds planner, retrieval, reasoner, reflection, and report.
+    When omitted, heuristic defaults run (offline / tests).
 
     Flow::
 
-        START → plan → research → search → evaluate ⇄ report → END
-                         ↑_________________________|
+        START → plan → research → search ⇄ ingest → retrieve → reason → reflect ⇄ report → END
     """
 
-    graph: StateGraph[GraphState, None, GraphState, GraphState] = StateGraph(GraphState)
+    deps = resources
+    search = deps.search if deps is not None else search_service
 
-    graph.add_node("plan", plan_node)
+    # LangGraph's add_node overloads do not accept a plain Callable annotation.
+    plan: Any
+    ingest: Any
+    retrieve: Any
+    reason: Any
+    reflect: Any
+    report: Any
+
+    if deps is None:
+        plan = plan_node
+        ingest = ingest_node
+        retrieve = retrieve_node
+        reason = reason_node
+        reflect = reflect_node
+        report = report_node
+    else:
+
+        def plan(state: GraphState) -> dict[str, Any]:
+            return plan_node(state, planner=deps.planner)
+
+        def ingest(state: GraphState) -> dict[str, Any]:
+            return ingest_node(
+                state,
+                retrieval=deps.session,
+                chunk_config=deps.chunk_config,
+            )
+
+        def retrieve(state: GraphState) -> dict[str, Any]:
+            return retrieve_node(
+                state,
+                retrieval=deps.session,
+                reranker=deps.reranker,
+            )
+
+        def reason(state: GraphState) -> dict[str, Any]:
+            return reason_node(state, reasoner=deps.reasoner)
+
+        def reflect(state: GraphState) -> dict[str, Any]:
+            return reflect_node(state, reflection=deps.reflection)
+
+        def report(state: GraphState) -> dict[str, Any]:
+            return report_node(state, reporter=deps.reporter)
+
+    graph: StateGraph[GraphState, None, GraphState, GraphState] = StateGraph(GraphState)
+    graph.add_node("plan", plan)
     graph.add_node("research", research_node)
-    graph.add_node("search", cast(Any, _bound_search_node(search_service)))
-    graph.add_node("evaluate", evaluate_node)
-    graph.add_node("report", report_node)
+    graph.add_node("search", lambda state: search_node(state, search_service=search))
+    graph.add_node("ingest", ingest)
+    graph.add_node("retrieve", retrieve)
+    graph.add_node("reason", reason)
+    graph.add_node("reflect", reflect)
+    graph.add_node("report", report)
 
     graph.add_edge(START, "plan")
     graph.add_conditional_edges("plan", after_plan)
     graph.add_edge("research", "search")
-    graph.add_edge("search", "evaluate")
-    graph.add_conditional_edges("evaluate", after_evaluate)
+    graph.add_conditional_edges("search", after_search)
+    graph.add_edge("ingest", "retrieve")
+    graph.add_edge("retrieve", "reason")
+    graph.add_edge("reason", "reflect")
+    graph.add_conditional_edges("reflect", after_reflect)
     graph.add_edge("report", END)
-
     return graph
 
 
@@ -117,16 +246,15 @@ def compile_graph(
     *,
     search_service: SearchService | None = None,
     stub_search: bool = False,
+    resources: PipelineResources | None = None,
 ) -> CompiledStateGraph[GraphState, None, GraphState, GraphState]:
-    """Return a runnable graph with ``SearchService`` injected by default.
+    """Return a runnable graph with pipeline services injected by default."""
 
-    Prefer ``run_research`` for one-shot runs (it closes owned clients).
-    For long-lived compiled graphs, pass your own ``search_service`` and call
-    ``close()`` when finished. Pass ``stub_search=True`` for the offline stub.
-    """
-
-    service, _owns = resolve_search_service(search_service, stub_search=stub_search)
-    return build_graph(search_service=service).compile()
+    deps = resources or assemble_resources(
+        search_service=search_service,
+        stub_search=stub_search,
+    )
+    return build_graph(search_service=deps.search, resources=deps).compile()
 
 
 @traceable(name="run_research", run_type="chain", tags=["insightforge", "research"])
@@ -145,31 +273,35 @@ def run_research(
 
     ``max_steps=None`` runs every planned research task (resolved after plan).
     A ``SearchService`` is injected by default; pass ``stub_search=True`` to
-    force the offline stub fetcher.
+    force the offline stub fetcher. Gemini is used when ``GEMINI_API_KEY`` is set.
     """
 
     configure_tracing()
-
-    service, owns_service = resolve_search_service(
-        search_service,
+    resources = assemble_resources(
+        search_service=search_service,
         stub_search=stub_search,
     )
     try:
-        # Pass the resolved service through; stub_search avoids a second create.
         state = cast(
             GraphState,
-            build_graph(search_service=service)
+            build_graph(search_service=resources.search, resources=resources)
             .compile()
             .invoke(initial_state(query, max_steps=max_steps, max_retries=max_retries)),
         )
     finally:
-        if owns_service and service is not None:
-            service.close()
+        resources.close()
+
+    confidence = state["score"]
+    if state["reflection"]:
+        raw = state["reflection"].get("confidence")
+        if isinstance(raw, int | float):
+            confidence = float(raw)
 
     result = WorkflowResult(
         query=state["query"],
         report=state["report"],
         score=state["score"],
+        confidence=confidence,
         phase=state["phase"],
         errors=tuple(state["errors"]),
         transitions=tuple(state["transitions"]),

@@ -368,7 +368,8 @@ def test_search_node_stub_path_without_search_service() -> None:
     state["phase"] = "research"
     result = search_node(state)
     assert result["sources"][0]["title"].startswith("Source 1")
-    assert "documents" not in result
+    assert result["documents"][0]["title"].startswith("Source 1")
+    assert "overview of AI" in result["documents"][0]["snippet"]
 
 
 def test_create_search_service_owns_and_closes_http_client(

@@ -23,12 +23,17 @@ class GraphState(TypedDict):
     notes: Annotated[list[str], add]
     sources: Annotated[list[dict[str, str]], add]
     documents: Annotated[list[dict[str, Any]], add]
+    chunks: list[dict[str, Any]]
+    hits: list[dict[str, Any]]
+    reasoning: dict[str, Any]
+    reflection: dict[str, Any]
     score: float
     report: str
     errors: Annotated[list[str], add]
     step: int
     max_steps: int
     max_retries: int
+    follow_up_used: int
     phase: str
     transitions: Annotated[list[str], add]
 
@@ -54,12 +59,17 @@ def initial_state(
         "notes": [],
         "sources": [],
         "documents": [],
+        "chunks": [],
+        "hits": [],
+        "reasoning": {},
+        "reflection": {},
         "score": 0.0,
         "report": "",
         "errors": [],
         "step": 0,
         "max_steps": AUTO_MAX_STEPS if max_steps is None else max_steps,
         "max_retries": max_retries,
+        "follow_up_used": 0,
         "phase": "init",
         "transitions": [],
     }

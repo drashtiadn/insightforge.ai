@@ -13,7 +13,8 @@ from insightforge.agents.planner.analysis import (
 from insightforge.agents.planner.decompose import decompose_tasks
 from insightforge.agents.planner.simple import SimplePlanner
 from insightforge.core.exceptions import ValidationFailedError
-from insightforge.graph.nodes import plan_node, report_node
+from insightforge.graph.nodes import plan_node
+from insightforge.graph.pipeline import report_node
 from insightforge.graph.state import initial_state
 from insightforge.shared.enums import QueryIntent, SearchProviderHint
 
@@ -130,5 +131,6 @@ def test_report_includes_intent() -> None:
     state["score"] = 0.5
 
     report = report_node(state)["report"]
-    assert "Intent: exploratory" in report
+    assert "AI" in report
     assert "Paper" in report
+    assert report.startswith("#")

@@ -21,4 +21,5 @@ async def root(
         version=settings.app_version,
         environment=settings.app_env,
         health_url=f"{settings.api_v1_prefix}/health",
+        research_url=f"{settings.api_v1_prefix}/research",
     )

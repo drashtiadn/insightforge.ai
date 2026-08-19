@@ -1,0 +1,151 @@
+"""Research HTTP API tests."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+from fastapi.testclient import TestClient
+
+from insightforge.application.use_cases import ResearchRun, ResearchSourceRef, execute_research
+from insightforge.core.config import get_settings
+from insightforge.core.exceptions import ValidationFailedError
+from insightforge.graph import WorkflowResult, initial_state
+
+
+def _run(**overrides: object) -> ResearchRun:
+    defaults: dict[str, object] = {
+        "query": "hybrid RAG",
+        "report": "# Hybrid RAG\n\nFindings...",
+        "score": 0.8,
+        "confidence": 0.75,
+        "phase": "done",
+        "ok": True,
+        "errors": (),
+        "transitions": ("init->plan", "reflect->report"),
+        "sources": (ResearchSourceRef(title="Paper", url="https://example.com/rag"),),
+    }
+    defaults.update(overrides)
+    return ResearchRun(**defaults)  # type: ignore[arg-type]
+
+
+def test_openapi_lists_research(client: TestClient) -> None:
+    paths = client.get("/openapi.json").json()["paths"]
+
+    assert "/api/v1/research" in paths
+    assert "post" in paths["/api/v1/research"]
+
+
+def test_research_returns_report(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_execute(
+        query: str,
+        *,
+        max_steps: int | None = None,
+        stub_search: bool = False,
+    ) -> ResearchRun:
+        captured["query"] = query
+        captured["max_steps"] = max_steps
+        captured["stub_search"] = stub_search
+        return _run(query=query)
+
+    monkeypatch.setattr("insightforge.api.routers.research.execute_research", fake_execute)
+
+    response = client.post(
+        "/api/v1/research",
+        json={"query": "  hybrid RAG  ", "max_steps": 2, "stub_search": True},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query"] == "hybrid RAG"
+    assert body["ok"] is True
+    assert body["phase"] == "done"
+    assert body["report"].startswith("# Hybrid RAG")
+    assert body["sources"] == [{"title": "Paper", "url": "https://example.com/rag"}]
+    assert captured == {"query": "hybrid RAG", "max_steps": 2, "stub_search": True}
+
+
+def test_research_rejects_empty_query(client: TestClient) -> None:
+    response = client.post("/api/v1/research", json={"query": "   "})
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "validation_failed"
+
+
+def test_root_includes_research_url(client: TestClient) -> None:
+    settings = get_settings()
+    body = client.get("/").json()
+
+    assert body["research_url"] == f"{settings.api_v1_prefix}/research"
+
+
+def _workflow_result(**overrides: object) -> WorkflowResult:
+    query = str(overrides.get("query", "hybrid RAG"))
+    state = initial_state(query)
+    state["sources"] = [
+        {"title": "Paper", "url": "https://example.com/rag"},
+        {"title": "Dup", "url": "https://example.com/rag"},
+        {"title": "Other", "url": "https://example.com/other"},
+    ]
+    state["phase"] = "done"
+    values: dict[str, object] = {
+        "query": query,
+        "report": "# Report",
+        "score": 0.5,
+        "confidence": 0.4,
+        "phase": "done",
+        "errors": (),
+        "transitions": ("init->plan",),
+        "state": state,
+    }
+    values.update(overrides)
+    return WorkflowResult(**values)  # type: ignore[arg-type]
+
+
+def test_execute_research_maps_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "insightforge.application.use_cases.research.run_research",
+        lambda query, **kwargs: _workflow_result(query=query),
+    )
+
+    run = execute_research("hybrid RAG", max_steps=1, stub_search=True)
+
+    assert run.ok
+    assert [source.url for source in run.sources] == [
+        "https://example.com/rag",
+        "https://example.com/other",
+    ]
+
+
+def test_execute_research_blocks_stub_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(query: str, **kwargs: object) -> WorkflowResult:
+        captured.update(kwargs)
+        return _workflow_result(query=query)
+
+    monkeypatch.setattr("insightforge.application.use_cases.research.run_research", fake_run)
+    settings = MagicMock(is_production=True)
+
+    execute_research("hybrid RAG", stub_search=True, settings=settings)
+
+    assert captured["stub_search"] is False
+
+
+def test_execute_research_rejects_empty_pipeline_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "insightforge.application.use_cases.research.run_research",
+        lambda query, **kwargs: _workflow_result(
+            query=query,
+            phase="failed",
+            errors=("query must not be empty",),
+            report="",
+            state=initial_state(query),
+        ),
+    )
+
+    with pytest.raises(ValidationFailedError, match="Query must not be empty"):
+        execute_research("hybrid RAG")

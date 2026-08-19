@@ -84,11 +84,19 @@ class RerankerHint(StrEnum):
     JINA = "jina"
 
 
+class LlmProviderHint(StrEnum):
+    """LLM backends for planner / reasoner / report agents."""
+
+    GEMINI = "gemini"
+    NONE = "none"
+
+
 __all__ = [
     "ChunkStrategy",
     "ContentType",
     "EmbeddingInputType",
     "EmbeddingProviderHint",
+    "LlmProviderHint",
     "QueryIntent",
     "RerankerHint",
     "RetrievalMode",

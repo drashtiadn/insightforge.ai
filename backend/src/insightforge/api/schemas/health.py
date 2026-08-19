@@ -22,3 +22,4 @@ class RootResponse(BaseModel):
     environment: Environment
     docs_url: str = "/docs"
     health_url: str = "/api/v1/health"
+    research_url: str = "/api/v1/research"

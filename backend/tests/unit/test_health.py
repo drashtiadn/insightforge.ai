@@ -36,6 +36,7 @@ def test_root_returns_service_discovery(client: TestClient) -> None:
         "environment": settings.app_env.value,
         "docs_url": "/docs",
         "health_url": f"{settings.api_v1_prefix}/health",
+        "research_url": f"{settings.api_v1_prefix}/research",
     }
 
 
@@ -45,4 +46,5 @@ def test_openapi_lists_versioned_health(client: TestClient) -> None:
     assert response.status_code == 200
     paths = response.json()["paths"]
     assert "/api/v1/health" in paths
+    assert "/api/v1/research" in paths
     assert "/" in paths

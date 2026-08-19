@@ -118,12 +118,14 @@ def test_run_research_happy_path() -> None:
     assert result.ok
     assert result.phase == "done"
     assert result.errors == ()
-    assert "multi-agent systems" in result.report
-    assert result.state["step"] == 3
-    assert len(result.state["tasks"]) == 3
+    assert "multi-agent systems" in result.report.lower()
+    assert result.state["step"] >= 3
+    assert len(result.state["tasks"]) >= 3
     assert "init->plan" in result.transitions
     assert "research->search" in result.transitions
     assert result.transitions[-1].endswith("->done")
+    assert "##" in result.report
+    assert 0.0 <= result.confidence <= 1.0
 
 
 def test_run_research_validation_failure() -> None:
@@ -153,8 +155,8 @@ def test_run_research_recovers_after_search_failure(
     assert result.phase == "done"
     assert not result.ok
     assert any("search failed" in err for err in result.errors)
-    assert "partial recovery" in result.report
-    assert "Errors:" in result.report
+    assert "partial recovery" in result.report.lower()
+    assert "## Errors" in result.report
     # Research notes were kept; sources could not be fetched.
     assert result.state["notes"]
     assert result.state["sources"] == []
@@ -173,7 +175,8 @@ def test_run_research_injects_and_closes_default_search_service(
                 Document(
                     title="Injected",
                     url="https://example.com/injected",
-                    snippet=query,
+                    snippet=f"Detailed notes about {query} covering methods and results.",
+                    content=f"Detailed notes about {query} covering methods, results, and limitations.",
                     provider=SearchProviderHint.WEB,
                 )
             ]

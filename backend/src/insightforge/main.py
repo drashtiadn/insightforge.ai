@@ -39,8 +39,16 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
+        description=(
+            "Multi-agent research API. Use **POST /api/v1/research** to run the LangGraph pipeline."
+        ),
         debug=False,
         lifespan=lifespan,
+        openapi_tags=[
+            {"name": "research", "description": "Run the research pipeline."},
+            {"name": "health", "description": "Liveness checks."},
+            {"name": "root", "description": "Service discovery."},
+        ],
     )
     register_middleware(app, settings)
     register_exception_handlers(app)
