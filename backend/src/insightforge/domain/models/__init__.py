@@ -8,6 +8,11 @@ from insightforge.domain.models.document import (
     ParsedDocument,
 )
 from insightforge.domain.models.embedding import EmbeddingResult
+from insightforge.domain.models.evaluation import (
+    EvaluationReport,
+    EvaluationSample,
+    MetricScore,
+)
 from insightforge.domain.models.research import (
     Conflict,
     Evidence,
@@ -28,8 +33,11 @@ __all__ = [
     "DocumentChunk",
     "DocumentRef",
     "EmbeddingResult",
+    "EvaluationReport",
+    "EvaluationSample",
     "Evidence",
     "EvidenceCluster",
+    "MetricScore",
     "ParsedDocument",
     "ReasoningResult",
     "ReflectionResult",

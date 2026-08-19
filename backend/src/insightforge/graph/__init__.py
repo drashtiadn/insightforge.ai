@@ -8,6 +8,7 @@ from insightforge.graph.edges import (
 )
 from insightforge.graph.nodes import fetch_source, plan_node, research_node, search_node
 from insightforge.graph.pipeline import (
+    evaluate_node,
     ingest_node,
     reason_node,
     reflect_node,
@@ -40,6 +41,7 @@ __all__ = [
     "build_graph",
     "call_with_retry",
     "compile_graph",
+    "evaluate_node",
     "fetch_source",
     "ingest_node",
     "initial_state",

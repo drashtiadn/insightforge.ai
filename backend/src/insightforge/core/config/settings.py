@@ -129,6 +129,11 @@ class Settings(BaseSettings):
     reranker_timeout_seconds: float = 30.0
     reranker_top_n: int | None = None
 
+    # Evaluation (Phase 7.1) — RAGAS / DeepEval / heuristic fallback
+    evaluation_enabled: bool = True
+    evaluation_backend: str = "auto"  # auto | ragas | deepeval | heuristic
+    evaluation_append_to_report: bool = True
+
     @property
     def is_production(self) -> bool:
         return self.app_env == Environment.PRODUCTION

@@ -10,7 +10,9 @@ from fastapi.testclient import TestClient
 from insightforge.application.use_cases import ResearchRun, ResearchSourceRef, execute_research
 from insightforge.core.config import get_settings
 from insightforge.core.exceptions import ValidationFailedError
+from insightforge.domain.models import EvaluationReport, MetricScore
 from insightforge.graph import WorkflowResult, initial_state
+from insightforge.shared.enums import EvaluationBackend, EvaluationMetric
 
 
 def _run(**overrides: object) -> ResearchRun:
@@ -64,7 +66,42 @@ def test_research_returns_report(client: TestClient, monkeypatch: pytest.MonkeyP
     assert body["phase"] == "done"
     assert body["report"].startswith("# Hybrid RAG")
     assert body["sources"] == [{"title": "Paper", "url": "https://example.com/rag"}]
+    assert body["evaluation"] is None
     assert captured == {"query": "hybrid RAG", "max_steps": 2, "stub_search": True}
+
+
+def test_research_returns_evaluation(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    evaluation = EvaluationReport(
+        query="hybrid RAG",
+        backend=EvaluationBackend.HEURISTIC,
+        metrics=[
+            MetricScore(name=EvaluationMetric.FAITHFULNESS, score=0.9, reason="grounded"),
+            MetricScore(name=EvaluationMetric.RELEVANCY, score=0.8),
+            MetricScore(name=EvaluationMetric.RECALL, score=0.7),
+            MetricScore(name=EvaluationMetric.PRECISION, score=0.6),
+        ],
+        overall=0.75,
+        context_count=2,
+    )
+
+    monkeypatch.setattr(
+        "insightforge.api.routers.research.execute_research",
+        lambda query, **kwargs: _run(query=query, evaluation=evaluation),
+    )
+
+    response = client.post("/api/v1/research", json={"query": "hybrid RAG", "stub_search": True})
+
+    assert response.status_code == 200
+    body = response.json()["evaluation"]
+    assert body["backend"] == "heuristic"
+    assert body["overall"] == pytest.approx(0.75)
+    assert body["context_count"] == 2
+    assert [item["name"] for item in body["metrics"]] == [
+        "faithfulness",
+        "relevancy",
+        "recall",
+        "precision",
+    ]
 
 
 def test_research_rejects_empty_query(client: TestClient) -> None:
@@ -118,6 +155,36 @@ def test_execute_research_maps_sources(monkeypatch: pytest.MonkeyPatch) -> None:
         "https://example.com/rag",
         "https://example.com/other",
     ]
+
+
+def test_execute_research_maps_evaluation(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = initial_state("hybrid RAG")
+    state["sources"] = [{"title": "Paper", "url": "https://example.com/rag"}]
+    state["evaluation"] = {
+        "query": "hybrid RAG",
+        "backend": "heuristic",
+        "metrics": [
+            {"name": "faithfulness", "score": 0.9, "reason": ""},
+            {"name": "relevancy", "score": 0.8, "reason": ""},
+            {"name": "recall", "score": 0.7, "reason": ""},
+            {"name": "precision", "score": 0.6, "reason": ""},
+        ],
+        "overall": 0.75,
+        "context_count": 3,
+        "ground_truth_used": False,
+        "metadata": {},
+    }
+    monkeypatch.setattr(
+        "insightforge.application.use_cases.research.run_research",
+        lambda query, **kwargs: _workflow_result(query=query, state=state),
+    )
+
+    run = execute_research("hybrid RAG", stub_search=True)
+
+    assert run.evaluation is not None
+    assert run.evaluation.backend is EvaluationBackend.HEURISTIC
+    assert run.evaluation.overall == pytest.approx(0.75)
+    assert run.evaluation.context_count == 3
 
 
 def test_execute_research_blocks_stub_in_production(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -55,6 +55,24 @@ class ResearchSource(BaseModel):
     url: str
 
 
+class EvaluationMetricScore(BaseModel):
+    """One automatic quality score attached to a research report."""
+
+    name: str
+    score: float = Field(ge=0.0, le=1.0)
+    reason: str = ""
+
+
+class EvaluationResult(BaseModel):
+    """Phase 7.1 evaluation of the generated answer against retrieved context."""
+
+    backend: str
+    overall: float = Field(ge=0.0, le=1.0)
+    metrics: list[EvaluationMetricScore] = Field(default_factory=list)
+    context_count: int = 0
+    ground_truth_used: bool = False
+
+
 class ResearchResponse(BaseModel):
     """Result of a completed research run."""
 
@@ -67,3 +85,7 @@ class ResearchResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
     transitions: list[str] = Field(default_factory=list)
     sources: list[ResearchSource] = Field(default_factory=list)
+    evaluation: EvaluationResult | None = Field(
+        default=None,
+        description="Automatic faithfulness, relevancy, recall, and precision scores.",
+    )

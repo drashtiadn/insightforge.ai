@@ -91,11 +91,31 @@ class LlmProviderHint(StrEnum):
     NONE = "none"
 
 
+class EvaluationBackend(StrEnum):
+    """Scoring backends for Phase 7.1 report evaluation."""
+
+    AUTO = "auto"
+    RAGAS = "ragas"
+    DEEPEVAL = "deepeval"
+    HEURISTIC = "heuristic"
+
+
+class EvaluationMetric(StrEnum):
+    """Standard RAG quality metrics (RAGAS / DeepEval)."""
+
+    FAITHFULNESS = "faithfulness"
+    RELEVANCY = "relevancy"
+    RECALL = "recall"
+    PRECISION = "precision"
+
+
 __all__ = [
     "ChunkStrategy",
     "ContentType",
     "EmbeddingInputType",
     "EmbeddingProviderHint",
+    "EvaluationBackend",
+    "EvaluationMetric",
     "LlmProviderHint",
     "QueryIntent",
     "RerankerHint",

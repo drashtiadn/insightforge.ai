@@ -25,6 +25,7 @@ from insightforge.core.logging import get_logger
 from insightforge.graph.edges import after_plan, after_reflect, after_search
 from insightforge.graph.nodes import plan_node, research_node, search_node
 from insightforge.graph.pipeline import (
+    evaluate_node,
     ingest_node,
     reason_node,
     reflect_node,
@@ -34,6 +35,11 @@ from insightforge.graph.pipeline import (
 from insightforge.graph.state import GraphState, initial_state
 from insightforge.infrastructure.document.chunking import ChunkConfig
 from insightforge.infrastructure.document.service import chunk_config_from_settings
+from insightforge.infrastructure.evaluation import (
+    EvaluationService,
+    HeuristicEvaluator,
+    create_evaluation_service,
+)
 from insightforge.infrastructure.llm import LlmService, create_llm_service
 from insightforge.infrastructure.rerankers import RerankerService, create_reranker_service
 from insightforge.infrastructure.retrieval import RetrievalService, create_retrieval_service
@@ -77,6 +83,7 @@ class PipelineResources:
     retrieval_root: RetrievalService
     session: RetrievalService
     reranker: RerankerService | None
+    evaluator: EvaluationService
     llm: LlmService
     planner: Planner
     reasoner: Reasoner
@@ -122,6 +129,7 @@ def assemble_resources(
     stub_search: bool = False,
     retrieval: RetrievalService | None = None,
     reranker: RerankerService | None = None,
+    evaluator: EvaluationService | None = None,
     llm: LlmService | None = None,
     planner: Planner | None = None,
     reasoner: Reasoner | None = None,
@@ -144,12 +152,28 @@ def assemble_resources(
     rerank_service = reranker
     if rerank_service is None and not stub_search:
         rerank_service = create_reranker_service()
+    if evaluator is not None:
+        evaluation_service = evaluator
+    elif stub_search:
+        cfg = get_settings()
+        evaluation_service = EvaluationService(
+            HeuristicEvaluator(),
+            enabled=cfg.evaluation_enabled,
+            append_to_report=cfg.evaluation_append_to_report,
+        )
+        logger.info(
+            "evaluation using heuristic backend for stub_search enabled=%s",
+            cfg.evaluation_enabled,
+        )
+    else:
+        evaluation_service = create_evaluation_service()
     return PipelineResources(
         search=search,
         owns_search=owns_search,
         retrieval_root=retrieval_root,
         session=session,
         reranker=rerank_service,
+        evaluator=evaluation_service,
         llm=llm_service,
         planner=planner or create_planner(llm_service),
         reasoner=reasoner or create_reasoner(llm_service),
@@ -171,7 +195,7 @@ def build_graph(
 
     Flow::
 
-        START → plan → research → search ⇄ ingest → retrieve → reason → reflect ⇄ report → END
+        START → plan → research → search ⇄ ingest → retrieve → reason → reflect ⇄ report → evaluate → END
     """
 
     deps = resources
@@ -184,6 +208,7 @@ def build_graph(
     reason: Any
     reflect: Any
     report: Any
+    evaluate: Any
 
     if deps is None:
         plan = plan_node
@@ -192,6 +217,7 @@ def build_graph(
         reason = reason_node
         reflect = reflect_node
         report = report_node
+        evaluate = evaluate_node
     else:
 
         def plan(state: GraphState) -> dict[str, Any]:
@@ -220,6 +246,9 @@ def build_graph(
         def report(state: GraphState) -> dict[str, Any]:
             return report_node(state, reporter=deps.reporter)
 
+        def evaluate(state: GraphState) -> dict[str, Any]:
+            return evaluate_node(state, evaluator=deps.evaluator)
+
     graph: StateGraph[GraphState, None, GraphState, GraphState] = StateGraph(GraphState)
     graph.add_node("plan", plan)
     graph.add_node("research", research_node)
@@ -229,6 +258,7 @@ def build_graph(
     graph.add_node("reason", reason)
     graph.add_node("reflect", reflect)
     graph.add_node("report", report)
+    graph.add_node("evaluate", evaluate)
 
     graph.add_edge(START, "plan")
     graph.add_conditional_edges("plan", after_plan)
@@ -238,7 +268,8 @@ def build_graph(
     graph.add_edge("retrieve", "reason")
     graph.add_edge("reason", "reflect")
     graph.add_conditional_edges("reflect", after_reflect)
-    graph.add_edge("report", END)
+    graph.add_edge("report", "evaluate")
+    graph.add_edge("evaluate", END)
     return graph
 
 
@@ -315,6 +346,11 @@ def run_research(
         errors=result.errors,
         transitions=result.transitions,
     )
+    evaluation = state.get("evaluation") or {}
+    overall = evaluation.get("overall")
+    if isinstance(overall, int | float):
+        summary["evaluation_overall"] = float(overall)
+        summary["evaluation_backend"] = evaluation.get("backend")
     if tracing_status().enabled:
         logger.info(
             "research run traced query=%r phase=%s ok=%s score=%s",

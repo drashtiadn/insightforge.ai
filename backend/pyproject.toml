@@ -29,6 +29,11 @@ local-embeddings = [
     # Embeddings (SentenceTransformer) and local CrossEncoder / BGE rerankers.
     "sentence-transformers>=3.0.0",
 ]
+evaluation = [
+    # Optional RAGAS / DeepEval backends. Heuristic evaluation always ships.
+    "ragas>=0.2.0",
+    "deepeval>=2.0.0",
+]
 
 [dependency-groups]
 dev = [
@@ -109,6 +114,17 @@ ignore_missing_imports = true
 module = ["numpy", "numpy.*", "qdrant_client", "qdrant_client.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = [
+    "ragas",
+    "ragas.*",
+    "deepeval",
+    "deepeval.*",
+    "datasets",
+    "datasets.*",
+]
+ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
 # Pytest

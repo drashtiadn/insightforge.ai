@@ -121,6 +121,18 @@ def test_gemini_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.llm_gemini_model == "gemini-2.5-flash"
 
 
+def test_evaluation_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EVALUATION_ENABLED", raising=False)
+    monkeypatch.delenv("EVALUATION_BACKEND", raising=False)
+    monkeypatch.delenv("EVALUATION_APPEND_TO_REPORT", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.evaluation_enabled is True
+    assert settings.evaluation_backend == "auto"
+    assert settings.evaluation_append_to_report is True
+
+
 def test_get_settings_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "development")
 

@@ -4,13 +4,35 @@ from fastapi import APIRouter
 
 from insightforge.api.schemas import (
     ErrorResponse,
+    EvaluationMetricScore,
+    EvaluationResult,
     ResearchRequest,
     ResearchResponse,
     ResearchSource,
 )
 from insightforge.application.use_cases import ResearchRun, execute_research
+from insightforge.domain.models import EvaluationReport
 
 router = APIRouter(tags=["research"])
+
+
+def _to_evaluation(report: EvaluationReport | None) -> EvaluationResult | None:
+    if report is None:
+        return None
+    return EvaluationResult(
+        backend=report.backend.value,
+        overall=report.overall,
+        metrics=[
+            EvaluationMetricScore(
+                name=metric.name.value,
+                score=metric.score,
+                reason=metric.reason,
+            )
+            for metric in report.metrics
+        ],
+        context_count=report.context_count,
+        ground_truth_used=report.ground_truth_used,
+    )
 
 
 def _to_response(run: ResearchRun) -> ResearchResponse:
@@ -24,6 +46,7 @@ def _to_response(run: ResearchRun) -> ResearchResponse:
         errors=list(run.errors),
         transitions=list(run.transitions),
         sources=[ResearchSource(title=source.title, url=source.url) for source in run.sources],
+        evaluation=_to_evaluation(run.evaluation),
     )
 
 
@@ -38,6 +61,8 @@ def run_research_endpoint(body: ResearchRequest) -> ResearchResponse:
 
     Live search and Gemini run when API keys are configured. This can take
     tens of seconds; set ``max_steps`` or ``stub_search`` for a shorter local try.
+    Successful reports include automatic faithfulness, relevancy, recall, and
+    precision scores when evaluation is enabled.
     """
 
     return _to_response(

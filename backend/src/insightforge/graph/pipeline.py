@@ -1,6 +1,6 @@
-"""Pipeline nodes — ingest, retrieve, reason, reflect, and report.
+"""Pipeline nodes — ingest, retrieve, reason, reflect, report, and evaluate.
 
-These run after the search loop and produce a cited ``ResearchReport``.
+These run after the search loop and produce a cited, quality-scored report.
 """
 
 from __future__ import annotations
@@ -27,6 +27,13 @@ from insightforge.graph.helpers import move
 from insightforge.graph.state import GraphState
 from insightforge.infrastructure.document.chunking import ChunkConfig, chunk_document
 from insightforge.infrastructure.document.citation import cite_chunks, cite_document
+from insightforge.infrastructure.evaluation import (
+    EvaluationService,
+    append_evaluation_section,
+    build_sample,
+    contexts_from_hits_and_documents,
+    create_evaluation_service,
+)
 from insightforge.infrastructure.rerankers import RerankerService
 from insightforge.infrastructure.retrieval import RetrievalService
 from insightforge.shared.enums import ContentType, QueryIntent, RetrievalMode, SearchProviderHint
@@ -311,5 +318,65 @@ def report_node(
     return {
         "report": markdown,
         "score": report.confidence if report.confidence else state["score"],
+        **move(state, "report"),
+    }
+
+
+def evaluate_node(
+    state: GraphState,
+    *,
+    evaluator: EvaluationService | None = None,
+) -> dict[str, Any]:
+    """Score the generated answer against retrieved context (Phase 7.1)."""
+
+    service = evaluator or create_evaluation_service()
+    if not service.enabled:
+        logger.info("evaluation skipped (disabled)")
+        return {"evaluation": {}, **move(state, "done")}
+
+    try:
+        reasoning = (
+            ReasoningResult.model_validate(state["reasoning"]) if state["reasoning"] else None
+        )
+    except ValidationError:
+        reasoning = None
+    answer = reasoning.answer.strip() if reasoning is not None else ""
+    if not answer:
+        answer = state["report"]
+
+    hits = [RetrievalHit.model_validate(raw) for raw in state["hits"]]
+    documents = _documents_from_state(state)
+    sample = build_sample(
+        query=state["query"],
+        answer=answer,
+        contexts=contexts_from_hits_and_documents(hits, documents),
+    )
+    try:
+        report = service.evaluate(sample)
+    except Exception as exc:
+        logger.warning("evaluation failed error=%s", exc)
+        return {
+            "evaluation": {"error": str(exc)},
+            **move(state, "done"),
+        }
+
+    markdown = state["report"]
+    if service.append_to_report and markdown:
+        markdown = append_evaluation_section(markdown, report)
+
+    logger.info(
+        "evaluate node backend=%s overall=%.2f contexts=%d",
+        report.backend.value,
+        report.overall,
+        report.context_count,
+        extra={
+            "backend": report.backend.value,
+            "overall": report.overall,
+            "contexts": report.context_count,
+        },
+    )
+    return {
+        "evaluation": report.model_dump(mode="json"),
+        "report": markdown,
         **move(state, "done"),
     }

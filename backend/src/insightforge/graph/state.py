@@ -27,6 +27,7 @@ class GraphState(TypedDict):
     hits: list[dict[str, Any]]
     reasoning: dict[str, Any]
     reflection: dict[str, Any]
+    evaluation: dict[str, Any]
     score: float
     report: str
     errors: Annotated[list[str], add]
@@ -63,6 +64,7 @@ def initial_state(
         "hits": [],
         "reasoning": {},
         "reflection": {},
+        "evaluation": {},
         "score": 0.0,
         "report": "",
         "errors": [],

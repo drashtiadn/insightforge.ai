@@ -171,8 +171,11 @@ def test_full_graph_run() -> None:
     )
     assert "retrieve->reason" in result["transitions"]
     assert "reason->reflect" in result["transitions"]
-    assert result["transitions"][-1] == "reflect->done"
+    assert result["transitions"][-1] == "report->done"
     assert "##" in result["report"]
+    assert "## Evaluation" in result["report"]
+    assert result["evaluation"]
+    assert result["evaluation"]["metrics"]
 
 
 def test_full_graph_empty_query() -> None:

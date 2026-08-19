@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pydantic import ValidationError
+
 from insightforge.core.config import Settings, get_settings
 from insightforge.core.exceptions import ValidationFailedError
+from insightforge.domain.models import EvaluationReport
 from insightforge.graph import WorkflowResult, run_research
 
 
@@ -30,6 +33,7 @@ class ResearchRun:
     errors: tuple[str, ...]
     transitions: tuple[str, ...]
     sources: tuple[ResearchSourceRef, ...]
+    evaluation: EvaluationReport | None = None
 
 
 def _sources_from_result(result: WorkflowResult) -> tuple[ResearchSourceRef, ...]:
@@ -49,6 +53,16 @@ def _unit(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
+def _evaluation_from_result(result: WorkflowResult) -> EvaluationReport | None:
+    raw = result.state.get("evaluation") or {}
+    if not raw or "metrics" not in raw:
+        return None
+    try:
+        return EvaluationReport.model_validate(raw)
+    except ValidationError:
+        return None
+
+
 def _to_run(result: WorkflowResult) -> ResearchRun:
     return ResearchRun(
         query=result.query,
@@ -60,6 +74,7 @@ def _to_run(result: WorkflowResult) -> ResearchRun:
         errors=result.errors,
         transitions=result.transitions,
         sources=_sources_from_result(result),
+        evaluation=_evaluation_from_result(result),
     )
 
 
