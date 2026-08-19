@@ -4,9 +4,19 @@ from __future__ import annotations
 
 from insightforge.graph.state import GraphState
 
-# Score needed before we stop researching and write the report (only after
-# planned tasks are exhausted, or when no structured tasks exist).
+# Used as a fallback gate when reflection is missing.
 PASS_SCORE = 0.7
+
+
+def _has_partial(state: GraphState) -> bool:
+    return bool(
+        state["plan"]
+        or state["notes"]
+        or state["sources"]
+        or state["documents"]
+        or state["chunks"]
+        or state["reasoning"]
+    )
 
 
 def after_plan(state: GraphState) -> str:
@@ -17,32 +27,34 @@ def after_plan(state: GraphState) -> str:
     return "research"
 
 
-def after_evaluate(state: GraphState) -> str:
-    """Choose the next step after evaluation.
+def after_search(state: GraphState) -> str:
+    """Gather remaining planned tasks, then ingest. Recover with partial data."""
 
-    Order of decisions:
-    1. Soft failure with partial data → report (error recovery)
-    2. Hard failure with no useful data → end
-    3. Research budget exhausted → report
-    4. Planned tasks remain within budget → research again
-    5. Score met with no remaining planned work → report
-    6. Otherwise → research again
-    """
-
-    has_partial = bool(state["plan"] or state["notes"] or state["sources"])
-    if state["errors"] and has_partial:
-        return "report"
-    if state["errors"]:
+    if state["errors"] and not _has_partial(state):
         return "__end__"
 
     if state["step"] >= state["max_steps"]:
-        return "report"
+        return "ingest"
 
     tasks = state["tasks"]
     if tasks and state["step"] < len(tasks):
-        # Execute every planned task up to the budget before score early-exit.
         return "research"
 
-    if state["score"] >= PASS_SCORE:
+    return "ingest"
+
+
+def after_reflect(state: GraphState) -> str:
+    """Report, or run a follow-up search when reflection scheduled more work."""
+
+    if state["errors"] and not _has_partial(state):
+        return "__end__"
+    if state["errors"]:
         return "report"
-    return "research"
+
+    if (
+        state["step"] < state["max_steps"]
+        and state["tasks"]
+        and state["step"] < len(state["tasks"])
+    ):
+        return "research"
+    return "report"

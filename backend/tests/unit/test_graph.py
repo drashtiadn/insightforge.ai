@@ -1,20 +1,23 @@
-"""Tests for the LangGraph foundation."""
+"""Tests for the LangGraph foundation and Phase 6 pipeline."""
 
 from __future__ import annotations
 
 from insightforge.graph import (
     AUTO_MAX_STEPS,
-    PASS_SCORE,
-    after_evaluate,
     after_plan,
+    after_reflect,
+    after_search,
     compile_graph,
-    evaluate_node,
+    ingest_node,
     initial_state,
     plan_node,
     report_node,
     research_node,
+    retrieve_node,
     search_node,
 )
+from insightforge.infrastructure.retrieval import RetrievalService
+from insightforge.infrastructure.vectorstores.stores import MemoryVectorStore
 
 
 def test_plan_creates_steps() -> None:
@@ -53,26 +56,29 @@ def test_research_and_search() -> None:
     assert searched["phase"] == "search"
     assert searched["sources"][0]["title"].startswith("Source 1")
     assert "example.com" in searched["sources"][0]["url"]
+    assert searched["documents"][0]["snippet"]
 
 
-def test_evaluate_scores_notes_and_sources() -> None:
-    state = initial_state("AI")
-    state["notes"] = ["a"]
-    state["sources"] = [{"title": "t", "url": "u"}]
-    result = evaluate_node(state)
-    assert result["score"] == 0.6
-    assert result["phase"] == "evaluate"
-
-
-def test_report_includes_query_and_sources() -> None:
+def test_report_includes_query() -> None:
     state = initial_state("AI")
     state["plan"] = ["step 1"]
-    state["notes"] = ["note 1"]
-    state["sources"] = [{"title": "Paper", "url": "https://example.com"}]
-    state["score"] = 0.5
+    state["intent"] = "exploratory"
+    state["documents"] = [
+        {
+            "title": "Paper",
+            "url": "https://example.com",
+            "snippet": "AI systems retrieve context.",
+            "content": "AI systems retrieve context for answers.",
+            "provider": "web",
+        }
+    ]
+    from insightforge.graph.pipeline import reason_node
+
+    reasoned = reason_node(state)
+    state["reasoning"] = reasoned["reasoning"]
     report = report_node(state)["report"]
     assert "AI" in report
-    assert "Paper" in report
+    assert report.startswith("#")
 
 
 def test_after_plan_routes() -> None:
@@ -84,44 +90,63 @@ def test_after_plan_routes() -> None:
     assert after_plan(bad) == "__end__"
 
 
-def test_after_evaluate_routes() -> None:
+def test_after_search_routes() -> None:
     state = initial_state("topic", max_steps=2)
-    state["score"] = 0.2
     state["step"] = 1
-    assert after_evaluate(state) == "research"
+    state["tasks"] = [{"id": "t1"}, {"id": "t2"}]
+    assert after_search(state) == "research"
 
-    state["score"] = PASS_SCORE
-    state["tasks"] = []
-    assert after_evaluate(state) == "report"
-
-    state["score"] = 0.1
     state["step"] = 2
-    assert after_evaluate(state) == "report"
+    assert after_search(state) == "ingest"
 
-
-def test_after_evaluate_continues_until_all_planned_tasks() -> None:
-    state = initial_state("topic", max_steps=3)
     state["tasks"] = [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}]
-    state["score"] = 1.0
     state["step"] = 2
-    # Score is high, but planned task t3 has not run yet.
-    assert after_evaluate(state) == "research"
+    state["max_steps"] = 3
+    assert after_search(state) == "research"
 
     state["step"] = 3
-    assert after_evaluate(state) == "report"
+    assert after_search(state) == "ingest"
 
 
-def test_after_evaluate_recovers_with_partial_data() -> None:
-    state = initial_state("topic")
+def test_after_search_recovers_with_partial_data() -> None:
+    state = initial_state("topic", max_steps=1)
     state["errors"] = ["search failed: boom"]
     state["notes"] = ["partial note"]
-    assert after_evaluate(state) == "report"
+    state["step"] = 1
+    assert after_search(state) == "ingest"
 
 
-def test_after_evaluate_ends_when_nothing_to_recover() -> None:
+def test_after_search_ends_when_nothing_to_recover() -> None:
     state = initial_state("topic")
     state["errors"] = ["hard failure"]
-    assert after_evaluate(state) == "__end__"
+    assert after_search(state) == "__end__"
+
+
+def test_after_reflect_reports_by_default() -> None:
+    state = initial_state("topic", max_steps=1)
+    state["step"] = 1
+    assert after_reflect(state) == "report"
+
+
+def test_ingest_and_retrieve_bm25() -> None:
+    state = initial_state("retrieval augmented generation")
+    state["documents"] = [
+        {
+            "title": "RAG intro",
+            "url": "https://example.com/rag",
+            "snippet": "Retrieval augmented generation combines search with LLMs.",
+            "content": "Retrieval augmented generation combines search with LLMs.",
+            "provider": "web",
+        }
+    ]
+    retrieval = RetrievalService(MemoryVectorStore())
+    ingested = ingest_node(state, retrieval=retrieval)
+    assert ingested["phase"] == "ingest"
+    assert ingested["chunks"]
+    state["chunks"] = ingested["chunks"]
+    retrieved = retrieve_node(state, retrieval=retrieval)
+    assert retrieved["hits"]
+    assert retrieved["hits"][0]["text"]
 
 
 def test_full_graph_run() -> None:
@@ -131,18 +156,23 @@ def test_full_graph_run() -> None:
     assert result["errors"] == []
     assert result["phase"] == "done"
     assert result["report"]
-    assert "multi-agent systems" in result["report"]
+    assert "multi-agent systems" in result["report"].lower()
     assert result["intent"]
     assert len(result["plan"]) == 3
-    assert len(result["tasks"]) == 3
-    assert result["max_steps"] == 3
-    assert result["step"] == 3
-    assert len(result["notes"]) == 3
-    assert len(result["sources"]) == 3
-    assert result["score"] >= PASS_SCORE
+    assert len(result["tasks"]) >= 3
+    assert result["max_steps"] >= 3
+    assert result["step"] >= 3
+    assert len(result["notes"]) >= 3
+    assert len(result["sources"]) >= 3
     assert "init->plan" in result["transitions"]
     assert "research->search" in result["transitions"]
-    assert result["transitions"][-1] == "evaluate->done"
+    assert "search->ingest" in result["transitions"] or any(
+        item.endswith("->ingest") for item in result["transitions"]
+    )
+    assert "retrieve->reason" in result["transitions"]
+    assert "reason->reflect" in result["transitions"]
+    assert result["transitions"][-1] == "reflect->done"
+    assert "##" in result["report"]
 
 
 def test_full_graph_empty_query() -> None:
@@ -161,10 +191,9 @@ def test_full_graph_stops_at_max_steps() -> None:
     assert result["step"] == 1
     assert len(result["notes"]) == 1
     assert len(result["sources"]) == 1
-    # One pass scores 0.6 — below PASS_SCORE — but max_steps forces report.
-    assert result["score"] < PASS_SCORE
     assert result["phase"] == "done"
     assert result["report"]
+    assert "budget test" in result["report"].lower()
 
 
 def test_initial_state_defaults_to_auto_max_steps() -> None:
@@ -185,8 +214,8 @@ def test_full_graph_uses_injected_search_service() -> None:
                 Document(
                     title=f"Doc for {query}",
                     url=f"https://example.com/{query.replace(' ', '-')}",
-                    snippet=query,
-                    content=query,
+                    snippet=f"Long-form background about {query} with enough detail.",
+                    content=f"Long-form background about {query} with enough detail for reasoning.",
                     provider=SearchProviderHint.WIKIPEDIA,
                 )
             ]
@@ -195,8 +224,13 @@ def test_full_graph_uses_injected_search_service() -> None:
         {SearchProviderHint.WIKIPEDIA: _Provider()},
         scoring=True,
     )
-    # Planner tasks include wikipedia for exploratory queries.
-    graph = compile_graph(search_service=service)
+    from insightforge.graph.workflow import assemble_resources
+
+    resources = assemble_resources(
+        search_service=service,
+        retrieval=RetrievalService(MemoryVectorStore()),
+    )
+    graph = compile_graph(resources=resources)
     result = graph.invoke(initial_state("photosynthesis", max_steps=1))
 
     assert result["errors"] == []

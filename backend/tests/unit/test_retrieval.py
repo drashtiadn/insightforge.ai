@@ -182,6 +182,18 @@ def test_index_texts_and_simple_retriever() -> None:
     assert hits[0].id == "d1"
 
 
+def test_index_lexical_bm25_without_embeddings() -> None:
+    service = RetrievalService(MemoryVectorStore())
+    written = service.index_lexical(
+        ["Retrieval augmented generation uses sparse lexical search"],
+        ids=["lex"],
+        metadata=[{"kind": "ml"}],
+    )
+    assert written == 1
+    hits = service.retrieve("lexical retrieval", mode=RetrievalMode.BM25, limit=1)
+    assert hits[0].id == "lex"
+
+
 def test_semantic_requires_embeddings() -> None:
     service = RetrievalService(MemoryVectorStore(dimensions=2))
     service.index([_record("a", "hello world", [1.0, 0.0])])

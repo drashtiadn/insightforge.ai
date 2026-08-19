@@ -171,6 +171,51 @@ class RetrievalService:
         ]
         return self.index(records)
 
+    def index_lexical(
+        self,
+        texts: Sequence[str],
+        *,
+        ids: Sequence[str] | None = None,
+        metadata: Sequence[Mapping[str, Any]] | None = None,
+    ) -> int:
+        """Index ``texts`` into BM25 only (no dense vectors).
+
+        Used when the embedding provider is unavailable so retrieval can still
+        run in ``bm25`` mode during CI and offline runs.
+        """
+
+        cleaned = [text.strip() for text in texts]
+        if any(not text for text in cleaned):
+            raise ValidationFailedError(
+                "indexed texts must not be empty",
+                details={"field": "texts"},
+            )
+        record_ids = list(ids) if ids is not None else [str(index) for index in range(len(cleaned))]
+        if len(record_ids) != len(cleaned):
+            raise ValidationFailedError(
+                "ids length must match texts",
+                details={"ids": len(record_ids), "texts": len(cleaned)},
+            )
+        if metadata is None:
+            meta_list: list[Mapping[str, Any]] = [{} for _ in cleaned]
+        else:
+            meta_list = list(metadata)
+            if len(meta_list) != len(cleaned):
+                raise ValidationFailedError(
+                    "metadata length must match texts",
+                    details={"metadata": len(meta_list), "texts": len(cleaned)},
+                )
+
+        for record_id, text, meta in zip(record_ids, cleaned, meta_list, strict=True):
+            self._bm25.upsert(record_id=record_id, text=text, metadata=meta)
+        logger.info(
+            "retrieval lexical index upserted=%d bm25_corpus=%d",
+            len(cleaned),
+            len(self._bm25),
+            extra={"upserted": len(cleaned), "bm25_corpus": len(self._bm25)},
+        )
+        return len(cleaned)
+
     def delete(
         self,
         *,

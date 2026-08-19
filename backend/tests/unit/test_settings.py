@@ -110,6 +110,17 @@ def test_search_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.search_max_documents == 20
 
 
+def test_gemini_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.gemini_api_key is None
+    assert settings.llm_provider == "gemini"
+    assert settings.llm_gemini_model == "gemini-2.5-flash"
+
+
 def test_get_settings_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "development")
 

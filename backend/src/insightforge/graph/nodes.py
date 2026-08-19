@@ -16,9 +16,11 @@ from insightforge.agents import Planner, SimplePlanner
 from insightforge.core.exceptions import ValidationFailedError
 from insightforge.core.logging import get_logger
 from insightforge.domain.models import ResearchTask
+from insightforge.graph.helpers import move
 from insightforge.graph.retry import call_with_retry
 from insightforge.graph.state import AUTO_MAX_STEPS, GraphState
 from insightforge.infrastructure.search import SearchService
+from insightforge.shared.enums import SearchProviderHint
 
 logger = get_logger(__name__)
 
@@ -26,10 +28,7 @@ logger = get_logger(__name__)
 def _move(state: GraphState, phase: str) -> dict[str, Any]:
     """Record the next phase and the transition that got us there."""
 
-    return {
-        "phase": phase,
-        "transitions": [f"{state['phase']}->{phase}"],
-    }
+    return move(state, phase)
 
 
 def plan_node(
@@ -104,6 +103,10 @@ def fetch_source(query: str, step: int) -> dict[str, str]:
     return {
         "title": f"Source {step} for {query}",
         "url": f"https://example.com/research/{step}",
+        "snippet": (
+            f"An overview of {query} covering definitions, history, "
+            f"current practice, and open questions. Source {step}."
+        ),
     }
 
 
@@ -169,42 +172,15 @@ def search_node(
             **_move(state, "failed"),
         }
 
-    return {"sources": [source], **_move(state, "search")}
-
-
-def evaluate_node(state: GraphState) -> dict[str, Any]:
-    """Score research quality from notes and sources (0.0-1.0)."""
-
-    # One pass ~0.6 (below PASS_SCORE); two passes reach 1.0.
-    score = min(1.0, 0.3 * len(state["notes"]) + 0.3 * len(state["sources"]))
-    return {"score": score, **_move(state, "evaluate")}
-
-
-def report_node(state: GraphState) -> dict[str, Any]:
-    """Build a short report from plan, notes, and sources."""
-
-    plan = "\n".join(f"- {item}" for item in state["plan"]) or "- none"
-    notes = "\n".join(f"- {note}" for note in state["notes"]) or "- none"
-    sources = "\n".join(f"- [{s['title']}]({s['url']})" for s in state["sources"]) or "- none"
-    intent = state["intent"] or "unknown"
-
-    report = (
-        f"Query: {state['query']}\n"
-        f"Intent: {intent}\n"
-        f"Score: {state['score']}\n\n"
-        f"Plan:\n{plan}\n\n"
-        f"Notes:\n{notes}\n\n"
-        f"Sources:\n{sources}\n"
-    )
-    if state["documents"]:
-        doc_lines = []
-        for doc in state["documents"]:
-            score = doc.get("score")
-            score_txt = f" score={score:.3f}" if isinstance(score, int | float) else ""
-            doc_lines.append(f"- [{doc.get('title')}]({doc.get('url')}){score_txt}")
-        report += "\nDocuments:\n" + "\n".join(doc_lines) + "\n"
-    if state["errors"]:
-        error_lines = "\n".join(f"- {err}" for err in state["errors"])
-        report += f"\nErrors:\n{error_lines}\n"
-
-    return {"report": report, **_move(state, "done")}
+    document = {
+        "title": source["title"],
+        "url": source["url"],
+        "snippet": source.get("snippet") or source["title"],
+        "content": source.get("snippet") or source["title"],
+        "provider": SearchProviderHint.WEB.value,
+    }
+    return {
+        "sources": [{"title": source["title"], "url": source["url"]}],
+        "documents": [document],
+        **_move(state, "search"),
+    }
