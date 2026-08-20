@@ -149,6 +149,88 @@ def test_ingest_and_retrieve_bm25() -> None:
     assert retrieved["hits"][0]["text"]
 
 
+def test_ingest_falls_back_to_lexical_when_dense_embed_fails() -> None:
+    """Available embedders can still fail at call time; clear() must not abort."""
+
+    from insightforge.core.exceptions import ExternalServiceError
+    from insightforge.infrastructure.embeddings.service import EmbeddingService
+    from insightforge.shared.enums import EmbeddingProviderHint
+
+    class _BoomProvider:
+        name = EmbeddingProviderHint.VOYAGE
+
+        @property
+        def available(self) -> bool:
+            return True
+
+        @property
+        def model(self) -> str:
+            return "boom"
+
+        def embed(self, texts: list[str], *, input_type: object) -> object:
+            raise ExternalServiceError("voyage down", details={"provider": "voyage"})
+
+    state = initial_state("budget test")
+    state["documents"] = [
+        {
+            "title": "Source 1",
+            "url": "https://example.com/1",
+            "snippet": "An overview of budget test covering definitions and practice.",
+            "content": "An overview of budget test covering definitions and practice.",
+            "provider": "web",
+        }
+    ]
+    retrieval = RetrievalService(
+        MemoryVectorStore(),
+        embeddings=EmbeddingService(_BoomProvider()),  # type: ignore[arg-type]
+    )
+    retrieval.index_lexical(["stale prior chunk"], ids=["old"])
+
+    ingested = ingest_node(state, retrieval=retrieval)
+
+    assert ingested["phase"] == "ingest"
+    assert ingested["chunks"]
+    assert len(retrieval._bm25) == len(ingested["chunks"])
+    state["chunks"] = ingested["chunks"]
+    retrieved = retrieve_node(state, retrieval=retrieval)
+    assert retrieved["hits"]
+    assert "budget test" in retrieved["hits"][0]["text"].lower()
+
+
+def test_full_graph_survives_dense_ingest_failure() -> None:
+    from insightforge.core.exceptions import ExternalServiceError
+    from insightforge.graph.workflow import assemble_resources, build_graph
+    from insightforge.infrastructure.embeddings.service import EmbeddingService
+    from insightforge.shared.enums import EmbeddingProviderHint
+
+    class _BoomProvider:
+        name = EmbeddingProviderHint.VOYAGE
+
+        @property
+        def available(self) -> bool:
+            return True
+
+        @property
+        def model(self) -> str:
+            return "boom"
+
+        def embed(self, texts: list[str], *, input_type: object) -> object:
+            raise ExternalServiceError("voyage down", details={"provider": "voyage"})
+
+    resources = assemble_resources(stub_search=True)
+    resources.session = RetrievalService(
+        MemoryVectorStore(),
+        embeddings=EmbeddingService(_BoomProvider()),  # type: ignore[arg-type]
+    )
+    result = build_graph(search_service=None, resources=resources).compile().invoke(
+        initial_state("budget test", max_steps=1)
+    )
+
+    assert result["phase"] == "done"
+    assert result["report"]
+    assert "budget test" in result["report"].lower()
+
+
 def test_full_graph_run() -> None:
     graph = compile_graph(stub_search=True)
     result = graph.invoke(initial_state("multi-agent systems"))

@@ -129,10 +129,21 @@ def ingest_node(
                 }
                 for chunk in chunks
             ]
+            # Dense indexing can fail even when the embedder looks available
+            # (timeouts, 5xx, auth). Fall back to BM25 so clear() does not leave
+            # an empty index and abort the research run.
             embedder = retrieval.embeddings
+            indexed = False
             if embedder is not None and embedder.available:
-                retrieval.index_texts(texts, ids=ids, metadata=metadata)
-            else:
+                try:
+                    retrieval.index_texts(texts, ids=ids, metadata=metadata)
+                    indexed = True
+                except Exception as exc:
+                    logger.warning(
+                        "dense ingest failed; falling back to lexical error=%s",
+                        exc,
+                    )
+            if not indexed:
                 retrieval.index_lexical(texts, ids=ids, metadata=metadata)
 
     return {
