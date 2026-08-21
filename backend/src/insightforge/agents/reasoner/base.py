@@ -31,6 +31,7 @@ class Reasoner(BaseAgent):
         *,
         hits: Sequence[RetrievalHit] | None = None,
         documents: Sequence[Document] | None = None,
+        feedback: str | None = None,
     ) -> ReasoningResult:
         """Return a structured reasoning result for ``query``."""
 
@@ -40,7 +41,8 @@ class Reasoner(BaseAgent):
         *,
         hits: Sequence[RetrievalHit] | None = None,
         documents: Sequence[Document] | None = None,
+        feedback: str | None = None,
     ) -> ReasoningResult:
         """``BaseAgent`` entry point — delegates to ``reason``."""
 
-        return self.reason(query, hits=hits, documents=documents)
+        return self.reason(query, hits=hits, documents=documents, feedback=feedback)

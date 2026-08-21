@@ -58,3 +58,11 @@ def after_reflect(state: GraphState) -> str:
     ):
         return "research"
     return "report"
+
+
+def after_judge(state: GraphState) -> str:
+    """Retry reasoning when the judge rejects the answer, otherwise finish."""
+
+    if state["phase"] == "judge":
+        return "reason"
+    return "__end__"

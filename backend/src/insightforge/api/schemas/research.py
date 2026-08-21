@@ -73,6 +73,21 @@ class EvaluationResult(BaseModel):
     ground_truth_used: bool = False
 
 
+class JudgeResult(BaseModel):
+    """Phase 7.2 LLM-as-judge verdict against the confidence threshold."""
+
+    passed: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    threshold: float = Field(ge=0.0, le=1.0)
+    quality: float = Field(ge=0.0, le=1.0)
+    issues: list[str] = Field(default_factory=list)
+    revision_hint: str = ""
+    backend: str
+    retry: bool = False
+    attempt: int = 0
+    max_retries: int = 0
+
+
 class ResearchResponse(BaseModel):
     """Result of a completed research run."""
 
@@ -88,4 +103,8 @@ class ResearchResponse(BaseModel):
     evaluation: EvaluationResult | None = Field(
         default=None,
         description="Automatic faithfulness, relevancy, recall, and precision scores.",
+    )
+    judgment: JudgeResult | None = Field(
+        default=None,
+        description="Self-reflection verdict against the confidence threshold.",
     )

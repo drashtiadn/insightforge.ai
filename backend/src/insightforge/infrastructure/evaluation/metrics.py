@@ -138,12 +138,18 @@ def build_report(
 def append_evaluation_section(markdown: str, report: EvaluationReport) -> str:
     """Append (or insert before Errors) the evaluation section."""
 
-    section = report.to_markdown().strip()
+    return insert_section_before_errors(markdown, report.to_markdown())
+
+
+def insert_section_before_errors(markdown: str, section: str) -> str:
+    """Append ``section``, keeping any ``## Errors`` block at the end."""
+
+    cleaned = section.strip()
     body = markdown.rstrip()
     if not body:
-        return section + "\n"
+        return cleaned + "\n"
     marker = "\n## Errors\n"
     if marker in markdown:
         head, tail = markdown.split(marker, 1)
-        return f"{head.rstrip()}\n\n{section}\n{marker}{tail.lstrip()}"
-    return f"{body}\n\n{section}\n"
+        return f"{head.rstrip()}\n\n{cleaned}\n{marker}{tail.lstrip()}"
+    return f"{body}\n\n{cleaned}\n"

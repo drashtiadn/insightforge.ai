@@ -6,12 +6,13 @@ from insightforge.api.schemas import (
     ErrorResponse,
     EvaluationMetricScore,
     EvaluationResult,
+    JudgeResult,
     ResearchRequest,
     ResearchResponse,
     ResearchSource,
 )
 from insightforge.application.use_cases import ResearchRun, execute_research
-from insightforge.domain.models import EvaluationReport
+from insightforge.domain.models import EvaluationReport, JudgeVerdict
 
 router = APIRouter(tags=["research"])
 
@@ -35,6 +36,23 @@ def _to_evaluation(report: EvaluationReport | None) -> EvaluationResult | None:
     )
 
 
+def _to_judgment(verdict: JudgeVerdict | None) -> JudgeResult | None:
+    if verdict is None:
+        return None
+    return JudgeResult(
+        passed=verdict.passed,
+        confidence=verdict.confidence,
+        threshold=verdict.threshold,
+        quality=verdict.quality,
+        issues=list(verdict.issues),
+        revision_hint=verdict.revision_hint,
+        backend=verdict.backend,
+        retry=verdict.retry,
+        attempt=verdict.attempt,
+        max_retries=verdict.max_retries,
+    )
+
+
 def _to_response(run: ResearchRun) -> ResearchResponse:
     return ResearchResponse(
         query=run.query,
@@ -47,6 +65,7 @@ def _to_response(run: ResearchRun) -> ResearchResponse:
         transitions=list(run.transitions),
         sources=[ResearchSource(title=source.title, url=source.url) for source in run.sources],
         evaluation=_to_evaluation(run.evaluation),
+        judgment=_to_judgment(run.judgment),
     )
 
 
@@ -61,8 +80,8 @@ def run_research_endpoint(body: ResearchRequest) -> ResearchResponse:
 
     Live search and Gemini run when API keys are configured. This can take
     tens of seconds; set ``max_steps`` or ``stub_search`` for a shorter local try.
-    Successful reports include automatic faithfulness, relevancy, recall, and
-    precision scores when evaluation is enabled.
+    Successful reports include automatic quality scores and an LLM-as-judge
+    verdict when evaluation and judging are enabled.
     """
 
     return _to_response(

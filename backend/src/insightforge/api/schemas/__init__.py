@@ -5,6 +5,7 @@ from insightforge.api.schemas.health import HealthResponse, RootResponse
 from insightforge.api.schemas.research import (
     EvaluationMetricScore,
     EvaluationResult,
+    JudgeResult,
     ResearchRequest,
     ResearchResponse,
     ResearchSource,
@@ -15,6 +16,7 @@ __all__ = [
     "EvaluationMetricScore",
     "EvaluationResult",
     "HealthResponse",
+    "JudgeResult",
     "ResearchRequest",
     "ResearchResponse",
     "ResearchSource",

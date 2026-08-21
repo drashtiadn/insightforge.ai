@@ -134,6 +134,11 @@ class Settings(BaseSettings):
     evaluation_backend: str = "auto"  # auto | ragas | deepeval | heuristic
     evaluation_append_to_report: bool = True
 
+    # Self-reflection (Phase 7.2) — LLM judge, retry, confidence gate
+    judge_enabled: bool = True
+    judge_confidence_threshold: float = 0.5
+    judge_max_retries: int = 1
+
     @property
     def is_production(self) -> bool:
         return self.app_env == Environment.PRODUCTION

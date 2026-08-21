@@ -17,6 +17,7 @@ from insightforge.core.logging import get_logger
 from insightforge.domain.models import (
     Document,
     DocumentChunk,
+    EvaluationReport,
     ParsedDocument,
     ReasoningResult,
     ReflectionResult,
@@ -29,10 +30,13 @@ from insightforge.infrastructure.document.chunking import ChunkConfig, chunk_doc
 from insightforge.infrastructure.document.citation import cite_chunks, cite_document
 from insightforge.infrastructure.evaluation import (
     EvaluationService,
+    JudgeService,
     append_evaluation_section,
     build_sample,
     contexts_from_hits_and_documents,
     create_evaluation_service,
+    create_judge_service,
+    insert_section_before_errors,
 )
 from insightforge.infrastructure.rerankers import RerankerService
 from insightforge.infrastructure.retrieval import RetrievalService
@@ -212,11 +216,15 @@ def reason_node(
     agent = reasoner or SimpleReasoner()
     hits = [RetrievalHit.model_validate(raw) for raw in state["hits"]]
     documents = _documents_from_state(state)
+    feedback = state["revision_hint"].strip() or None
     try:
-        result = agent.reason(state["query"], hits=hits, documents=documents)
+        result = agent.reason(state["query"], hits=hits, documents=documents, feedback=feedback)
     except Exception as exc:
         logger.warning("reasoner failed error=%s", exc)
         result = ReasoningResult(query=state["query"], answer="")
+
+    if feedback:
+        logger.info("reason node applied revision hint chars=%d", len(feedback))
 
     logger.info(
         "reason node confidence=%.2f clusters=%d",
@@ -332,7 +340,7 @@ def evaluate_node(
     service = evaluator or create_evaluation_service()
     if not service.enabled:
         logger.info("evaluation skipped (disabled)")
-        return {"evaluation": {}, **move(state, "done")}
+        return {"evaluation": {}, **move(state, "evaluate")}
 
     try:
         reasoning = (
@@ -357,7 +365,7 @@ def evaluate_node(
         logger.warning("evaluation failed error=%s", exc)
         return {
             "evaluation": {"error": str(exc)},
-            **move(state, "done"),
+            **move(state, "evaluate"),
         }
 
     markdown = state["report"]
@@ -377,6 +385,104 @@ def evaluate_node(
     )
     return {
         "evaluation": report.model_dump(mode="json"),
+        "report": markdown,
+        **move(state, "evaluate"),
+    }
+
+
+def _evaluation_from_state(state: GraphState) -> EvaluationReport | None:
+    raw = state["evaluation"] or {}
+    if not raw or "metrics" not in raw:
+        return None
+    try:
+        return EvaluationReport.model_validate(raw)
+    except ValidationError:
+        return None
+
+
+def _reflection_confidence(state: GraphState) -> float:
+    raw = state["reflection"].get("confidence") if state["reflection"] else None
+    if isinstance(raw, int | float):
+        return float(raw)
+    return float(state["score"] or 0.0)
+
+
+def judge_node(
+    state: GraphState,
+    *,
+    judge: JudgeService | None = None,
+) -> dict[str, Any]:
+    """LLM-as-judge confidence gate; retry reasoning when below threshold."""
+
+    service = judge or create_judge_service(heuristic=True)
+    if not service.enabled:
+        logger.info("judge skipped (disabled)")
+        return {"judgment": {}, **move(state, "done")}
+
+    try:
+        reasoning = (
+            ReasoningResult.model_validate(state["reasoning"]) if state["reasoning"] else None
+        )
+    except ValidationError:
+        reasoning = None
+    answer = reasoning.answer.strip() if reasoning is not None else ""
+    if not answer:
+        answer = state["report"]
+
+    hits = [RetrievalHit.model_validate(raw) for raw in state["hits"]]
+    documents = _documents_from_state(state)
+    sample = build_sample(
+        query=state["query"],
+        answer=answer,
+        contexts=contexts_from_hits_and_documents(hits, documents),
+    )
+    attempt = state["judge_retries"]
+    try:
+        verdict = service.judge(
+            sample,
+            evaluation=_evaluation_from_state(state),
+            reflection_confidence=_reflection_confidence(state),
+            attempt=attempt,
+        )
+    except Exception as exc:
+        logger.warning("judge failed error=%s", exc)
+        return {
+            "judgment": {"error": str(exc), "passed": False, "retry": False},
+            **move(state, "done"),
+        }
+
+    if verdict.retry:
+        next_attempt = attempt + 1
+        logger.info(
+            "judge retrying reason attempt=%d/%d hint=%r",
+            next_attempt,
+            verdict.max_retries,
+            verdict.revision_hint,
+        )
+        return {
+            "judgment": verdict.model_dump(mode="json"),
+            "revision_hint": verdict.revision_hint,
+            "judge_retries": next_attempt,
+            **move(state, "judge"),
+        }
+
+    markdown = state["report"]
+    if markdown:
+        markdown = insert_section_before_errors(markdown, verdict.to_markdown())
+    logger.info(
+        "judge node passed=%s confidence=%.2f backend=%s",
+        verdict.passed,
+        verdict.confidence,
+        verdict.backend,
+        extra={
+            "passed": verdict.passed,
+            "confidence": verdict.confidence,
+            "backend": verdict.backend,
+            "attempt": verdict.attempt,
+        },
+    )
+    return {
+        "judgment": verdict.model_dump(mode="json"),
         "report": markdown,
         **move(state, "done"),
     }

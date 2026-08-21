@@ -133,6 +133,18 @@ def test_evaluation_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.evaluation_append_to_report is True
 
 
+def test_judge_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("JUDGE_ENABLED", raising=False)
+    monkeypatch.delenv("JUDGE_CONFIDENCE_THRESHOLD", raising=False)
+    monkeypatch.delenv("JUDGE_MAX_RETRIES", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.judge_enabled is True
+    assert settings.judge_confidence_threshold == 0.5
+    assert settings.judge_max_retries == 1
+
+
 def test_get_settings_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "development")
 

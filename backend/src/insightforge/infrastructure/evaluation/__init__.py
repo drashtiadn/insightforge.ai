@@ -1,10 +1,17 @@
-"""RAG report evaluation — RAGAS, DeepEval, and heuristic fallback."""
+"""RAG report evaluation — RAGAS, DeepEval, heuristic scores, and LLM judge."""
 
 from insightforge.infrastructure.evaluation.base import Evaluator
+from insightforge.infrastructure.evaluation.judge import (
+    HeuristicJudge,
+    JudgeService,
+    LlmJudge,
+    create_judge_service,
+)
 from insightforge.infrastructure.evaluation.metrics import (
     append_evaluation_section,
     build_report,
     clamp_unit,
+    insert_section_before_errors,
 )
 from insightforge.infrastructure.evaluation.providers import (
     DeepEvalEvaluator,
@@ -34,6 +41,9 @@ __all__ = [
     "EvaluationService",
     "Evaluator",
     "HeuristicEvaluator",
+    "HeuristicJudge",
+    "JudgeService",
+    "LlmJudge",
     "RagasEvaluator",
     "RagasRunFn",
     "append_evaluation_section",
@@ -43,7 +53,9 @@ __all__ = [
     "clamp_unit",
     "contexts_from_hits_and_documents",
     "create_evaluation_service",
+    "create_judge_service",
     "deepeval_installed",
+    "insert_section_before_errors",
     "openai_configured",
     "parse_evaluation_backend",
     "ragas_installed",

@@ -16,7 +16,11 @@ from insightforge.agents.planner import (
     SimplePlanner,
 )
 from insightforge.agents.reasoner import LlmReasoner, Reasoner, SimpleReasoner
-from insightforge.agents.reflection import ReflectionAgent, SimpleReflectionAgent
+from insightforge.agents.reflection import (
+    LlmReflectionAgent,
+    ReflectionAgent,
+    SimpleReflectionAgent,
+)
 from insightforge.agents.report import LlmReportGenerator, ReportGenerator, SimpleReportGenerator
 from insightforge.agents.reranker import SimpleReranker
 from insightforge.agents.retriever import SimpleRetriever
@@ -28,6 +32,7 @@ __all__ = [
     "FunctionTool",
     "LlmPlanner",
     "LlmReasoner",
+    "LlmReflectionAgent",
     "LlmReportGenerator",
     "Planner",
     "QueryAnalysis",

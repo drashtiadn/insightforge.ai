@@ -11,6 +11,7 @@ from insightforge.domain.models.embedding import EmbeddingResult
 from insightforge.domain.models.evaluation import (
     EvaluationReport,
     EvaluationSample,
+    JudgeVerdict,
     MetricScore,
 )
 from insightforge.domain.models.research import (
@@ -37,6 +38,7 @@ __all__ = [
     "EvaluationSample",
     "Evidence",
     "EvidenceCluster",
+    "JudgeVerdict",
     "MetricScore",
     "ParsedDocument",
     "ReasoningResult",

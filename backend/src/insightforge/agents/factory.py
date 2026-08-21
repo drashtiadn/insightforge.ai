@@ -8,7 +8,11 @@ from insightforge.agents.planner.simple import SimplePlanner
 from insightforge.agents.reasoner.base import Reasoner
 from insightforge.agents.reasoner.llm import LlmReasoner
 from insightforge.agents.reasoner.simple import SimpleReasoner
-from insightforge.agents.reflection import SimpleReflectionAgent
+from insightforge.agents.reflection import (
+    LlmReflectionAgent,
+    ReflectionAgent,
+    SimpleReflectionAgent,
+)
 from insightforge.agents.report.base import ReportGenerator
 from insightforge.agents.report.llm import LlmReportGenerator
 from insightforge.agents.report.simple import SimpleReportGenerator
@@ -39,7 +43,9 @@ def create_report_generator(llm: LlmService | None = None) -> ReportGenerator:
     return SimpleReportGenerator()
 
 
-def create_reflection_agent() -> SimpleReflectionAgent:
-    """Reflection stays heuristic (deterministic gap checks)."""
+def create_reflection_agent(llm: LlmService | None = None) -> ReflectionAgent:
+    """Return an LLM reflection agent when Gemini is available."""
 
+    if llm is not None and llm.available:
+        return LlmReflectionAgent(llm)
     return SimpleReflectionAgent()

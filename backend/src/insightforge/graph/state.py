@@ -28,6 +28,7 @@ class GraphState(TypedDict):
     reasoning: dict[str, Any]
     reflection: dict[str, Any]
     evaluation: dict[str, Any]
+    judgment: dict[str, Any]
     score: float
     report: str
     errors: Annotated[list[str], add]
@@ -35,6 +36,8 @@ class GraphState(TypedDict):
     max_steps: int
     max_retries: int
     follow_up_used: int
+    judge_retries: int
+    revision_hint: str
     phase: str
     transitions: Annotated[list[str], add]
 
@@ -65,6 +68,7 @@ def initial_state(
         "reasoning": {},
         "reflection": {},
         "evaluation": {},
+        "judgment": {},
         "score": 0.0,
         "report": "",
         "errors": [],
@@ -72,6 +76,8 @@ def initial_state(
         "max_steps": AUTO_MAX_STEPS if max_steps is None else max_steps,
         "max_retries": max_retries,
         "follow_up_used": 0,
+        "judge_retries": 0,
+        "revision_hint": "",
         "phase": "init",
         "transitions": [],
     }

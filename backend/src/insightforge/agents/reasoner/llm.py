@@ -56,6 +56,7 @@ class LlmReasoner(Reasoner):
         *,
         hits: Sequence[RetrievalHit] | None = None,
         documents: Sequence[Document] | None = None,
+        feedback: str | None = None,
     ) -> ReasoningResult:
         cleaned = query.strip()
         if not cleaned:
@@ -66,13 +67,13 @@ class LlmReasoner(Reasoner):
 
         if not self._llm.available:
             logger.info("llm reasoner unavailable; using heuristic reasoner")
-            return self._fallback.reason(cleaned, hits=hits, documents=documents)
+            return self._fallback.reason(cleaned, hits=hits, documents=documents, feedback=feedback)
 
         heuristic = SimpleReasoner(
             max_hits=self._max_hits,
             max_documents=self._max_documents,
         )
-        base = heuristic.reason(cleaned, hits=hits, documents=documents)
+        base = heuristic.reason(cleaned, hits=hits, documents=documents, feedback=feedback)
         compressed_hits = compress_hits(list(hits or []), max_items=self._max_hits)
         compressed_docs = compress_documents(
             list(documents or []),
@@ -99,6 +100,7 @@ class LlmReasoner(Reasoner):
                     query=cleaned,
                     clusters="\n".join(cluster_lines) or "(none)",
                     conflicts="\n".join(conflict_lines) or "(none)",
+                    feedback=(feedback.strip() if feedback and feedback.strip() else "(none)"),
                 ),
             },
         ]

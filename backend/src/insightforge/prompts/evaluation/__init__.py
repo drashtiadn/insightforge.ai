@@ -1,7 +1,6 @@
-"""Phase 7.1 evaluation metric definitions.
+"""Phase 7 evaluation prompts and metric definitions.
 
 Runtime scoring lives in ``insightforge.infrastructure.evaluation``.
-LLM-as-judge retry / confidence gates are Phase 7.2.
 """
 
 from insightforge.shared.enums import EvaluationMetric
@@ -19,4 +18,32 @@ METRIC_HELP = {
     ),
 }
 
-__all__ = ["METRIC_HELP"]
+JUDGE_SYSTEM = """\
+You are the InsightForge quality judge. Decide whether the research answer is \
+trustworthy enough to ship. Return JSON only:
+{"passed": true,
+ "confidence": 0.0,
+ "issues": ["<short issue>", "..."],
+ "revision_hint": "<what to fix if passed is false>"}
+confidence must be a number between 0 and 1. Set passed to true only when the \
+answer is faithful to the context, relevant to the query, and your confidence \
+is at least the given threshold. If passed is false, give a concrete revision_hint \
+the reasoner can follow. Do not invent sources.\
+"""
+
+JUDGE_USER = """\
+Query: {query}
+
+Answer:
+{answer}
+
+Retrieved context:
+{contexts}
+
+Automatic metrics:
+{metrics}
+Overall: {overall}
+Confidence threshold: {threshold}
+"""
+
+__all__ = ["JUDGE_SYSTEM", "JUDGE_USER", "METRIC_HELP"]

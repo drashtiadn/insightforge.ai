@@ -61,6 +61,7 @@ class SimpleReasoner(Reasoner):
         *,
         hits: Sequence[RetrievalHit] | None = None,
         documents: Sequence[Document] | None = None,
+        feedback: str | None = None,
     ) -> ReasoningResult:
         cleaned_query = query.strip()
         if not cleaned_query:
@@ -91,13 +92,14 @@ class SimpleReasoner(Reasoner):
         )
         conflicts = detect_conflicts(clusters)
         source_ids = self._collect_source_ids(clusters)
+        extra_claims = 2 if feedback and feedback.strip() else 0
         confidence = reasoning_confidence(
             clusters,
             conflicts,
             source_count=len(source_ids),
         )
 
-        answer, key_points = self._synthesize(clusters, conflicts)
+        answer, key_points = self._synthesize(clusters, conflicts, extra_claims=extra_claims)
 
         logger.info(
             "reasoner produced clusters=%d conflicts=%d sources=%d confidence=%.2f",
@@ -121,6 +123,7 @@ class SimpleReasoner(Reasoner):
             clusters=clusters,
             conflicts=conflicts,
             confidence=confidence,
+            metadata={"revision_hint": feedback.strip()} if feedback and feedback.strip() else {},
         )
 
     @staticmethod
@@ -140,11 +143,14 @@ class SimpleReasoner(Reasoner):
     def _synthesize(
         clusters: Sequence[EvidenceCluster],
         conflicts: Sequence[Conflict],
+        *,
+        extra_claims: int = 0,
     ) -> tuple[str, list[str]]:
         if not clusters:
             return "", []
 
-        top_claims = [cluster.claim.strip() for cluster in clusters[:_MAX_CLAIMS_IN_ANSWER]]
+        limit = _MAX_CLAIMS_IN_ANSWER + max(0, extra_claims)
+        top_claims = [cluster.claim.strip() for cluster in clusters[:limit]]
         top_claims = [claim for claim in top_claims if claim]
         if not top_claims:
             return "", []

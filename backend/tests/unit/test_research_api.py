@@ -67,6 +67,7 @@ def test_research_returns_report(client: TestClient, monkeypatch: pytest.MonkeyP
     assert body["report"].startswith("# Hybrid RAG")
     assert body["sources"] == [{"title": "Paper", "url": "https://example.com/rag"}]
     assert body["evaluation"] is None
+    assert body["judgment"] is None
     assert captured == {"query": "hybrid RAG", "max_steps": 2, "stub_search": True}
 
 
@@ -185,6 +186,32 @@ def test_execute_research_maps_evaluation(monkeypatch: pytest.MonkeyPatch) -> No
     assert run.evaluation.backend is EvaluationBackend.HEURISTIC
     assert run.evaluation.overall == pytest.approx(0.75)
     assert run.evaluation.context_count == 3
+
+
+def test_execute_research_maps_judgment(monkeypatch: pytest.MonkeyPatch) -> None:
+    from insightforge.domain.models import JudgeVerdict
+
+    state = initial_state("hybrid RAG")
+    state["sources"] = [{"title": "Paper", "url": "https://example.com/rag"}]
+    state["judgment"] = JudgeVerdict(
+        passed=True,
+        confidence=0.8,
+        threshold=0.5,
+        quality=0.75,
+        backend="heuristic",
+        attempt=0,
+        max_retries=1,
+    ).model_dump(mode="json")
+    monkeypatch.setattr(
+        "insightforge.application.use_cases.research.run_research",
+        lambda query, **kwargs: _workflow_result(query=query, state=state),
+    )
+
+    run = execute_research("hybrid RAG", stub_search=True)
+
+    assert run.judgment is not None
+    assert run.judgment.passed is True
+    assert run.judgment.confidence == pytest.approx(0.8)
 
 
 def test_execute_research_blocks_stub_in_production(monkeypatch: pytest.MonkeyPatch) -> None:

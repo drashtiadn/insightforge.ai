@@ -126,7 +126,9 @@ def test_run_research_happy_path() -> None:
     assert result.transitions[-1].endswith("->done")
     assert "##" in result.report
     assert "## Evaluation" in result.report
+    assert "## Self-Reflection" in result.report
     assert result.state["evaluation"]
+    assert result.state["judgment"]
     assert 0.0 <= result.confidence <= 1.0
 
 

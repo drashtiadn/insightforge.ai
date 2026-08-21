@@ -248,8 +248,8 @@ def test_evaluate_node_appends_scores() -> None:
 
     result = evaluate_node(state, evaluator=EvaluationService(HeuristicEvaluator()))
 
-    assert result["phase"] == "done"
-    assert result["transitions"] == ["report->done"]
+    assert result["phase"] == "evaluate"
+    assert result["transitions"] == ["report->evaluate"]
     assert "## Evaluation" in result["report"]
     assert result["evaluation"]["backend"] == "heuristic"
     assert result["evaluation"]["overall"] >= 0.0
@@ -267,5 +267,5 @@ def test_evaluate_node_disabled_skips_scoring() -> None:
     result = evaluate_node(state, evaluator=service)
 
     assert result["evaluation"] == {}
-    assert result["phase"] == "done"
-    assert result["transitions"] == ["report->done"]
+    assert result["phase"] == "evaluate"
+    assert result["transitions"] == ["report->evaluate"]

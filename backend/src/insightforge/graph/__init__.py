@@ -2,6 +2,7 @@
 
 from insightforge.graph.edges import (
     PASS_SCORE,
+    after_judge,
     after_plan,
     after_reflect,
     after_search,
@@ -10,6 +11,7 @@ from insightforge.graph.nodes import fetch_source, plan_node, research_node, sea
 from insightforge.graph.pipeline import (
     evaluate_node,
     ingest_node,
+    judge_node,
     reason_node,
     reflect_node,
     report_node,
@@ -34,6 +36,7 @@ __all__ = [
     "GraphState",
     "PipelineResources",
     "WorkflowResult",
+    "after_judge",
     "after_plan",
     "after_reflect",
     "after_search",
@@ -45,6 +48,7 @@ __all__ = [
     "fetch_source",
     "ingest_node",
     "initial_state",
+    "judge_node",
     "plan_node",
     "reason_node",
     "reflect_node",

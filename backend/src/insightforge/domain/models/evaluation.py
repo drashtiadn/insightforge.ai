@@ -17,6 +17,7 @@ from insightforge.shared.enums import EvaluationBackend, EvaluationMetric
 __all__ = [
     "EvaluationReport",
     "EvaluationSample",
+    "JudgeVerdict",
     "MetricScore",
 ]
 
@@ -87,5 +88,41 @@ class EvaluationReport(BaseModel):
             label = metric.name.value.replace("_", " ").title()
             lines.append(f"- **{label}**: {metric.score:.2f}{reason}")
         lines.append(f"- **Overall**: {self.overall:.2f}")
+        lines.append("")
+        return "\n".join(lines)
+
+
+class JudgeVerdict(BaseModel):
+    """Self-reflection verdict from the LLM (or heuristic) judge."""
+
+    passed: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    threshold: float = Field(ge=0.0, le=1.0)
+    quality: float = Field(ge=0.0, le=1.0)
+    issues: list[str] = Field(default_factory=list)
+    revision_hint: str = ""
+    backend: str = "heuristic"
+    retry: bool = False
+    attempt: int = 0
+    max_retries: int = 0
+
+    def to_markdown(self) -> str:
+        """Render a Markdown section suitable for appending to a report."""
+
+        lines = [
+            "## Self-Reflection",
+            "",
+            f"LLM-as-judge verdict (backend: `{self.backend}`).",
+            "",
+            f"- **Passed**: {'yes' if self.passed else 'no'}",
+            f"- **Confidence**: {self.confidence:.2f} (threshold {self.threshold:.2f})",
+            f"- **Quality**: {self.quality:.2f}",
+            f"- **Retries**: {self.attempt}/{self.max_retries}",
+        ]
+        if self.issues:
+            lines.extend(["", "Issues:"])
+            lines.extend(f"- {issue}" for issue in self.issues)
+        if self.revision_hint and not self.passed:
+            lines.extend(["", f"Revision hint: {self.revision_hint}"])
         lines.append("")
         return "\n".join(lines)

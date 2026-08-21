@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from insightforge.graph import (
     AUTO_MAX_STEPS,
+    after_judge,
     after_plan,
     after_reflect,
     after_search,
@@ -128,6 +129,14 @@ def test_after_reflect_reports_by_default() -> None:
     assert after_reflect(state) == "report"
 
 
+def test_after_judge_retries_or_ends() -> None:
+    state = initial_state("topic")
+    state["phase"] = "judge"
+    assert after_judge(state) == "reason"
+    state["phase"] = "done"
+    assert after_judge(state) == "__end__"
+
+
 def test_ingest_and_retrieve_bm25() -> None:
     state = initial_state("retrieval augmented generation")
     state["documents"] = [
@@ -171,11 +180,14 @@ def test_full_graph_run() -> None:
     )
     assert "retrieve->reason" in result["transitions"]
     assert "reason->reflect" in result["transitions"]
-    assert result["transitions"][-1] == "report->done"
+    assert result["transitions"][-1] == "evaluate->done"
     assert "##" in result["report"]
     assert "## Evaluation" in result["report"]
+    assert "## Self-Reflection" in result["report"]
     assert result["evaluation"]
     assert result["evaluation"]["metrics"]
+    assert result["judgment"]
+    assert "passed" in result["judgment"]
 
 
 def test_full_graph_empty_query() -> None:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 from uuid import uuid4
 
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langsmith import traceable
 
@@ -22,11 +22,12 @@ from insightforge.agents import (
 )
 from insightforge.core.config import get_settings
 from insightforge.core.logging import get_logger
-from insightforge.graph.edges import after_plan, after_reflect, after_search
+from insightforge.graph.edges import after_judge, after_plan, after_reflect, after_search
 from insightforge.graph.nodes import plan_node, research_node, search_node
 from insightforge.graph.pipeline import (
     evaluate_node,
     ingest_node,
+    judge_node,
     reason_node,
     reflect_node,
     report_node,
@@ -38,7 +39,9 @@ from insightforge.infrastructure.document.service import chunk_config_from_setti
 from insightforge.infrastructure.evaluation import (
     EvaluationService,
     HeuristicEvaluator,
+    JudgeService,
     create_evaluation_service,
+    create_judge_service,
 )
 from insightforge.infrastructure.llm import LlmService, create_llm_service
 from insightforge.infrastructure.rerankers import RerankerService, create_reranker_service
@@ -84,6 +87,7 @@ class PipelineResources:
     session: RetrievalService
     reranker: RerankerService | None
     evaluator: EvaluationService
+    judge: JudgeService
     llm: LlmService
     planner: Planner
     reasoner: Reasoner
@@ -130,6 +134,7 @@ def assemble_resources(
     retrieval: RetrievalService | None = None,
     reranker: RerankerService | None = None,
     evaluator: EvaluationService | None = None,
+    judge: JudgeService | None = None,
     llm: LlmService | None = None,
     planner: Planner | None = None,
     reasoner: Reasoner | None = None,
@@ -167,6 +172,10 @@ def assemble_resources(
         )
     else:
         evaluation_service = create_evaluation_service()
+    if judge is not None:
+        judge_service = judge
+    else:
+        judge_service = create_judge_service(llm=llm_service, heuristic=stub_search)
     return PipelineResources(
         search=search,
         owns_search=owns_search,
@@ -174,11 +183,12 @@ def assemble_resources(
         session=session,
         reranker=rerank_service,
         evaluator=evaluation_service,
+        judge=judge_service,
         llm=llm_service,
         planner=planner or create_planner(llm_service),
         reasoner=reasoner or create_reasoner(llm_service),
         reporter=reporter or create_report_generator(llm_service),
-        reflection=reflection or create_reflection_agent(),
+        reflection=reflection or create_reflection_agent(llm_service),
         chunk_config=chunk_config_from_settings(get_settings()),
     )
 
@@ -195,7 +205,7 @@ def build_graph(
 
     Flow::
 
-        START → plan → research → search ⇄ ingest → retrieve → reason → reflect ⇄ report → evaluate → END
+        START → plan → research → search ⇄ ingest → retrieve → reason → reflect ⇄ report → evaluate → judge ⇄ reason → END
     """
 
     deps = resources
@@ -209,6 +219,7 @@ def build_graph(
     reflect: Any
     report: Any
     evaluate: Any
+    judge_step: Any
 
     if deps is None:
         plan = plan_node
@@ -218,6 +229,7 @@ def build_graph(
         reflect = reflect_node
         report = report_node
         evaluate = evaluate_node
+        judge_step = judge_node
     else:
 
         def plan(state: GraphState) -> dict[str, Any]:
@@ -249,6 +261,9 @@ def build_graph(
         def evaluate(state: GraphState) -> dict[str, Any]:
             return evaluate_node(state, evaluator=deps.evaluator)
 
+        def judge_step(state: GraphState) -> dict[str, Any]:
+            return judge_node(state, judge=deps.judge)
+
     graph: StateGraph[GraphState, None, GraphState, GraphState] = StateGraph(GraphState)
     graph.add_node("plan", plan)
     graph.add_node("research", research_node)
@@ -259,6 +274,7 @@ def build_graph(
     graph.add_node("reflect", reflect)
     graph.add_node("report", report)
     graph.add_node("evaluate", evaluate)
+    graph.add_node("judge", judge_step)
 
     graph.add_edge(START, "plan")
     graph.add_conditional_edges("plan", after_plan)
@@ -269,7 +285,8 @@ def build_graph(
     graph.add_edge("reason", "reflect")
     graph.add_conditional_edges("reflect", after_reflect)
     graph.add_edge("report", "evaluate")
-    graph.add_edge("evaluate", END)
+    graph.add_edge("evaluate", "judge")
+    graph.add_conditional_edges("judge", after_judge)
     return graph
 
 
@@ -327,6 +344,10 @@ def run_research(
         raw = state["reflection"].get("confidence")
         if isinstance(raw, int | float):
             confidence = float(raw)
+    if state["judgment"]:
+        raw = state["judgment"].get("confidence")
+        if isinstance(raw, int | float):
+            confidence = float(raw)
 
     result = WorkflowResult(
         query=state["query"],
@@ -351,6 +372,10 @@ def run_research(
     if isinstance(overall, int | float):
         summary["evaluation_overall"] = float(overall)
         summary["evaluation_backend"] = evaluation.get("backend")
+    judgment = state.get("judgment") or {}
+    if "passed" in judgment:
+        summary["judge_passed"] = judgment.get("passed")
+        summary["judge_confidence"] = judgment.get("confidence")
     if tracing_status().enabled:
         logger.info(
             "research run traced query=%r phase=%s ok=%s score=%s",

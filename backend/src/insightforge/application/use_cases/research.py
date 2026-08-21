@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from insightforge.core.config import Settings, get_settings
 from insightforge.core.exceptions import ValidationFailedError
-from insightforge.domain.models import EvaluationReport
+from insightforge.domain.models import EvaluationReport, JudgeVerdict
 from insightforge.graph import WorkflowResult, run_research
 
 
@@ -34,6 +34,7 @@ class ResearchRun:
     transitions: tuple[str, ...]
     sources: tuple[ResearchSourceRef, ...]
     evaluation: EvaluationReport | None = None
+    judgment: JudgeVerdict | None = None
 
 
 def _sources_from_result(result: WorkflowResult) -> tuple[ResearchSourceRef, ...]:
@@ -63,6 +64,16 @@ def _evaluation_from_result(result: WorkflowResult) -> EvaluationReport | None:
         return None
 
 
+def _judgment_from_result(result: WorkflowResult) -> JudgeVerdict | None:
+    raw = result.state.get("judgment") or {}
+    if not raw or "passed" not in raw:
+        return None
+    try:
+        return JudgeVerdict.model_validate(raw)
+    except ValidationError:
+        return None
+
+
 def _to_run(result: WorkflowResult) -> ResearchRun:
     return ResearchRun(
         query=result.query,
@@ -75,6 +86,7 @@ def _to_run(result: WorkflowResult) -> ResearchRun:
         transitions=result.transitions,
         sources=_sources_from_result(result),
         evaluation=_evaluation_from_result(result),
+        judgment=_judgment_from_result(result),
     )
 
 
